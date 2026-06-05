@@ -2,7 +2,7 @@
 
 ## Summary
 
-API for managing users
+REST API spec for user management
 
 ## Acceptance Criteria
 

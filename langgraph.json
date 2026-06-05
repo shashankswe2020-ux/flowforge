@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "flowforge": "./src/graph/builder.py:build_live_graph"
+  },
+  "env": ".env"
+}

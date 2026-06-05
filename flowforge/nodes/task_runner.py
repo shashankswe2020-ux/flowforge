@@ -10,9 +10,42 @@ from pathlib import Path
 from typing import Any
 
 from flowforge.nodes._workspace import get_workdir
-from flowforge.nodes.capability import LLMProtocol
+from flowforge.nodes.capability import LLMProtocol, TaskExecutionResult
 from flowforge.nodes.task_executor import execute_task
 from flowforge.state.models import GraphState, Task, TaskStatus
+
+MAX_TASK_ATTEMPTS = 3
+
+
+def _execute_with_retry(task: Task, *, llm: LLMProtocol) -> TaskExecutionResult:
+    """Run ``execute_task`` up to ``MAX_TASK_ATTEMPTS`` times until it succeeds.
+
+    A task is retried when the executor returns ``TaskStatus.FAILED`` or raises.
+    Returns the last result; if every attempt failed, the result carries
+    ``status=FAILED`` and the most recent ``error_message``.
+    """
+    last_result: TaskExecutionResult | None = None
+    last_exc: Exception | None = None
+    for _ in range(MAX_TASK_ATTEMPTS):
+        try:
+            result = execute_task(task, llm=llm)
+        except Exception as exc:  # noqa: BLE001 — surface as failure, retry
+            last_exc = exc
+            continue
+        last_result = result
+        last_exc = None
+        if result.status != TaskStatus.FAILED:
+            return result
+    if last_result is not None:
+        return last_result
+    return TaskExecutionResult(
+        task_id=task.task_id,
+        status=TaskStatus.FAILED,
+        artifacts=[],
+        verification_evidence=[],
+        error_message=str(last_exc) if last_exc else "unknown error",
+        idempotency_key=None,
+    )
 
 
 def task_node(state: GraphState, *, llm: LLMProtocol) -> dict[str, Any]:
@@ -20,13 +53,15 @@ def task_node(state: GraphState, *, llm: LLMProtocol) -> dict[str, Any]:
 
     For each task definition produced by ``plan_node``:
       1. wraps it in a ``Task`` runtime object
-      2. calls ``execute_task`` which routes to the right capability executor
+      2. calls ``execute_task`` (with up to ``MAX_TASK_ATTEMPTS`` retries on
+         FAILED) which routes to the right capability executor
       3. writes each artifact's ``content`` to ``<workdir>/<artifact.path>``
       4. records the populated ``Task`` (with artifacts) on ``state.tasks``
 
-    The returned ``state.tasks`` is what code_review_node, security_audit_node,
-    and test_engineer_node read to build their review prompts, so populating
-    ``artifacts`` here is what allows the gates to analyze real code.
+    The returned ``state.tasks`` is what ``code_review_node``,
+    ``security_audit_node``, and ``test_engineer_node`` read to build their
+    review prompts, so populating ``artifacts`` here is what allows the gates
+    to analyze real code.
     """
     plan = state.implementation_plan
     if plan is None or not plan.dag.tasks:
@@ -38,7 +73,7 @@ def task_node(state: GraphState, *, llm: LLMProtocol) -> dict[str, Any]:
 
     for definition in plan.dag.tasks:
         task = Task(task_id=definition.task_id, definition=definition)
-        result = execute_task(task, llm=llm)
+        result = _execute_with_retry(task, llm=llm)
 
         for artifact in result.artifacts:
             if not artifact.content:

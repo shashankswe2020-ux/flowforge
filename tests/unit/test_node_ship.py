@@ -247,6 +247,35 @@ class TestShipNode:
         assert counts["critical"] == 1
         assert counts["high"] == 2
 
+    def test_blocked_run_still_pushes_and_updates_readme(self, tmp_path) -> None:
+        """When blocked, README is still regenerated and code is still pushed."""
+        issues = [
+            _issue(
+                severity=IssueSeverity.CRITICAL,
+                disposition=IssueDisposition.MUST_FIX_BEFORE_SHIP,
+            ),
+        ]
+        state = _state(issues=issues)
+        state.workdir = str(tmp_path)
+        llm = MockLLM(responses=["# Generated README\n\nProject overview."])
+
+        with patch("flowforge.nodes.ship._push_to_remote", return_value=True) as mock_push, \
+             patch("flowforge.nodes.ship._commit_release_artifacts", return_value="abc123") as mock_commit:
+            result = ship_node(state, production_mode=False, llm=llm)
+
+        # Blocked status preserved
+        assert result["run_status"] == RunStatus.BLOCKED
+        assert not result["shipping_result"].shipped
+        # But README was generated and pushed
+        assert (tmp_path / "README.md").exists()
+        assert "Generated README" in (tmp_path / "README.md").read_text()
+        mock_commit.assert_called_once()  # README commit happened
+        mock_push.assert_called_once()  # push happened despite blocked
+        # provenance reflects this
+        chain = result["shipping_result"].provenance_chain
+        assert any("readme:generated" in p for p in chain)
+        assert any("push:pushed" in p for p in chain)
+
 
 class TestVersioning:
     """Version determination follows semantic versioning."""

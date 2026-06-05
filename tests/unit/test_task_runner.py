@@ -33,7 +33,7 @@ def _state_with_plan(workdir: Path, *, capability: CapabilityType = CapabilityTy
         phases=["Phase 1"],
         dag=TaskDAG(tasks=[defn], edges=[]),
     )
-    return GraphState(initial_prompt="x", workdir=str(workdir), implementation_plan=plan)
+    return GraphState(request="x", workdir=str(workdir), implementation_plan=plan)
 
 
 def _llm_response(payload: dict) -> MagicMock:
@@ -80,7 +80,7 @@ def test_task_node_writes_artifact_files_to_workdir(tmp_path: Path) -> None:
 
 
 def test_task_node_returns_empty_when_plan_missing(tmp_path: Path) -> None:
-    state = GraphState(initial_prompt="x", workdir=str(tmp_path))
+    state = GraphState(request="x", workdir=str(tmp_path))
     llm = MagicMock()
     assert task_node(state, llm=llm) == {"tasks": []}
     llm.invoke.assert_not_called()
@@ -139,4 +139,87 @@ def test_task_node_handles_agent_capabilities(tmp_path: Path, capability: Capabi
     result = task_node(state, llm=llm)
 
     assert (tmp_path / "ok.py").exists()
+    assert result["tasks"][0].status == TaskStatus.SUCCEEDED
+
+
+def test_task_node_retries_failed_tasks(tmp_path: Path) -> None:
+    """Failed task is retried up to MAX_TASK_ATTEMPTS times."""
+    from unittest.mock import patch
+
+    state = _state_with_plan(tmp_path)
+    llm = MagicMock()
+
+    failed = MagicMock()
+    failed.status = TaskStatus.FAILED
+    failed.artifacts = []
+    failed.verification_evidence = []
+    failed.error_message = "transient error"
+    failed.idempotency_key = None
+
+    succeeded = MagicMock()
+    succeeded.status = TaskStatus.SUCCEEDED
+    succeeded.artifacts = []
+    succeeded.verification_evidence = []
+    succeeded.error_message = None
+    succeeded.idempotency_key = None
+
+    # First attempt fails, second succeeds
+    with patch(
+        "flowforge.nodes.task_runner.execute_task",
+        side_effect=[failed, succeeded],
+    ) as mock_exec:
+        result = task_node(state, llm=llm)
+
+    assert mock_exec.call_count == 2
+    assert result["tasks"][0].status == TaskStatus.SUCCEEDED
+
+
+def test_task_node_gives_up_after_max_attempts(tmp_path: Path) -> None:
+    """After MAX_TASK_ATTEMPTS failures, surface the last failed result."""
+    from unittest.mock import patch
+
+    from flowforge.nodes.task_runner import MAX_TASK_ATTEMPTS
+
+    state = _state_with_plan(tmp_path)
+    llm = MagicMock()
+
+    failed = MagicMock()
+    failed.status = TaskStatus.FAILED
+    failed.artifacts = []
+    failed.verification_evidence = []
+    failed.error_message = "still broken"
+    failed.idempotency_key = None
+
+    with patch(
+        "flowforge.nodes.task_runner.execute_task",
+        return_value=failed,
+    ) as mock_exec:
+        result = task_node(state, llm=llm)
+
+    assert mock_exec.call_count == MAX_TASK_ATTEMPTS
+    assert result["tasks"][0].status == TaskStatus.FAILED
+    assert result["tasks"][0].error_message == "still broken"
+
+
+def test_task_node_recovers_from_executor_exception(tmp_path: Path) -> None:
+    """Exceptions raised by the executor count as a retry-eligible failure."""
+    from unittest.mock import patch
+
+    state = _state_with_plan(tmp_path)
+    llm = MagicMock()
+
+    succeeded = MagicMock()
+    succeeded.status = TaskStatus.SUCCEEDED
+    succeeded.artifacts = []
+    succeeded.verification_evidence = []
+    succeeded.error_message = None
+    succeeded.idempotency_key = None
+
+    with patch(
+        "flowforge.nodes.task_runner.execute_task",
+        side_effect=[RuntimeError("boom"), succeeded],
+    ) as mock_exec:
+        result = task_node(state, llm=llm)
+
+    assert mock_exec.call_count == 2
     assert result["tasks"][0].status == TaskStatus.SUCCEEDED

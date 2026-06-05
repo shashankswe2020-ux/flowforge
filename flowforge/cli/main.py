@@ -244,8 +244,11 @@ def _prepare_workspace(
     - If --skip-github, just initialize a local git repo (no remote).
     - Otherwise, attempt ``gh repo create --clone`` into the workdir. If the
       repo already exists or creation fails, fall back to local init.
+    - Always check out a fresh feature branch ``flowforge/run-<timestamp>``
+      so every run produces a PR rather than pushing directly to ``main``.
     """
     import subprocess
+    from datetime import datetime
     from pathlib import Path
 
     from flowforge.nodes._workspace import slugify
@@ -254,6 +257,7 @@ def _prepare_workspace(
     workspace_root = Path.home() / "flowforge-workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     workdir = workspace_root / name
+    branch_name = f"flowforge/run-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
     target_repo: str | None = name
     repo_url: str | None = None
@@ -270,6 +274,7 @@ def _prepare_workspace(
             repo_url = result.stdout.strip() or None
         except subprocess.CalledProcessError:
             repo_url = None
+        _checkout_run_branch(workdir, branch_name)
         return (str(workdir), target_repo, repo_url)
 
     if skip_github:
@@ -283,6 +288,7 @@ def _prepare_workspace(
             click.echo(f"  ✓ Initialized local git repo at {workdir}")
         except (subprocess.CalledProcessError, FileNotFoundError):
             click.echo(f"  ⚠️  git init failed at {workdir}")
+        _checkout_run_branch(workdir, branch_name)
         return (str(workdir), target_repo, None)
 
     # Try to create on GitHub and clone into workdir
@@ -337,7 +343,68 @@ def _prepare_workspace(
             cwd=str(workdir), capture_output=True, check=True,
         )
 
+    _bootstrap_main_branch(workdir)
+    _checkout_run_branch(workdir, branch_name)
     return (str(workdir), target_repo, repo_url)
+
+
+def _bootstrap_main_branch(workdir: Path) -> None:
+    """Ensure the remote has a ``main`` branch with at least one commit.
+
+    Fresh ``gh repo create`` repos are completely empty, so a PR cannot be
+    opened against ``main`` until that branch exists. This makes a single
+    empty commit on ``main`` and pushes it (best-effort), so the feature
+    branch we're about to create has a base to PR against.
+    """
+    import subprocess
+
+    cwd = str(workdir)
+    if not (workdir / ".git").exists():
+        return
+    # Skip if there's already a commit on this branch
+    try:
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=cwd, capture_output=True, check=True,
+        )
+        already_has_commits = True
+    except subprocess.CalledProcessError:
+        already_has_commits = False
+
+    try:
+        if not already_has_commits:
+            subprocess.run(
+                ["git", "commit", "--allow-empty", "-m", "chore: initial commit", "--quiet"],
+                cwd=cwd, capture_output=True, check=True,
+            )
+        # Best-effort push of main so the remote default branch exists.
+        subprocess.run(
+            ["git", "push", "origin", "main"],
+            cwd=cwd, capture_output=True, check=False,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+
+def _checkout_run_branch(workdir: Path, branch_name: str) -> None:
+    """Create and check out a fresh feature branch for this run.
+
+    All artifact / docs commits emitted by the pipeline land on this branch
+    so ``ship_node`` can push it and open a PR instead of mutating ``main``.
+    """
+    import subprocess
+
+    if not (workdir / ".git").exists():
+        return
+    try:
+        subprocess.run(
+            ["git", "checkout", "-b", branch_name],
+            cwd=str(workdir), capture_output=True, check=True,
+        )
+        click.echo(f"  ✓ Created feature branch {branch_name}")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # Branch already exists or git unavailable — best effort
+        pass
 
 
 def _write_env_file(config: FlowForgeConfig) -> None:

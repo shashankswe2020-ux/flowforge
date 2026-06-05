@@ -8,6 +8,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import click
@@ -413,7 +414,9 @@ def _write_env_file(config: FlowForgeConfig) -> None:
     import subprocess
     from pathlib import Path
 
-    env_path = Path.cwd() / ".env"
+    env_dir = Path.home() / ".flowforge"
+    env_dir.mkdir(parents=True, exist_ok=True)
+    env_path = env_dir / ".env"
     env_vars: dict[str, str] = {}
 
     # Read existing .env if present
@@ -775,20 +778,32 @@ def _start_studio(config: FlowForgeConfig) -> subprocess.Popen | None:  # type: 
 
     click.echo(f"🚀 Starting LangGraph server on port {config.langgraph_port}...")
 
-    log_path = Path.home() / ".flowforge" / "langgraph-dev.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    flowforge_dir = Path.home() / ".flowforge"
+    flowforge_dir.mkdir(parents=True, exist_ok=True)
+    config_path = flowforge_dir / "langgraph.json"
+    config_path.write_text(json.dumps({
+        "dependencies": ["swe-forge"],
+        "graphs": {
+            "flowforge": "flowforge.graph.builder:build_live_graph",
+        },
+        "env": str(flowforge_dir / ".env"),
+    }, indent=2))
+
+    log_path = flowforge_dir / "langgraph-dev.log"
     log_handle = log_path.open("w")
     click.echo(f"   (server logs → {log_path})")
 
     process = subprocess.Popen(
         [
             "langgraph", "dev",
+            "--config", str(config_path),
             "--port", str(config.langgraph_port),
             "--no-browser",
             "--no-reload",
         ],
         stdout=log_handle,
         stderr=subprocess.STDOUT,
+        cwd=str(flowforge_dir),
     )
 
     import time
@@ -796,6 +811,7 @@ def _start_studio(config: FlowForgeConfig) -> subprocess.Popen | None:  # type: 
 
     if process.poll() is not None:
         click.echo("⚠️  LangGraph server failed to start.\n")
+        click.echo(f"   Check log: {log_path}\n")
         return None
 
     return process

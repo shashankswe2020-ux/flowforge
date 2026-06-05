@@ -3,8 +3,8 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "flowforge"
-version = "0.1.18"
+name = "swe-forge"
+version = "0.1.21"
 description = "Multi-agent LangGraph framework for autonomous software development"
 requires-python = ">=3.12"
 license = "MIT"
@@ -32,6 +32,7 @@ dependencies = [
 ]
 
 [project.scripts]
+swe-forge = "flowforge.cli.main:cli"
 flowforge = "flowforge.cli.main:cli"
 
 [tool.setuptools.packages.find]

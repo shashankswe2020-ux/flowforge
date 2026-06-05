@@ -12,18 +12,18 @@ quality gates pass.
 
 ```bash
 # 1. install
-pip install -e .
+pip install swe-forge
 
 # 2. configure provider/model (one-time)
-flowforge setup
+swe-forge setup
 
 # 3. run a prompt — auto-creates a private GitHub repo and pushes there
-flowforge run "build cute kawaii calculator web app"
+swe-forge run "build cute kawaii calculator web app"
 
 # common flags
-flowforge run "<prompt>" --repo my-name      # use/create a specific repo
-flowforge run "<prompt>" --skip-github       # local-only, no remote
-flowforge run "<prompt>" --no-studio         # skip LangGraph Studio
+swe-forge run "<prompt>" --repo my-name      # use/create a specific repo
+swe-forge run "<prompt>" --skip-github       # local-only, no remote
+swe-forge run "<prompt>" --no-studio         # skip LangGraph Studio
 ```
 
 Generated projects land in `~/flowforge-workspace/<slug>/` and are
@@ -37,7 +37,7 @@ Run with `gpt-4o-mini` via GitHub Copilot (~58s end-to-end).
 ### Command
 
 ```bash
-flowforge run "build cute kawaii calculator web app" \
+swe-forge run "build cute kawaii calculator web app" \
   --repo cute-kawaii-calculator-web --no-studio
 ```
 

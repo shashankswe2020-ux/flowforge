@@ -1,9 +1,9 @@
 """FlowForge CLI — main entry point.
 
 Usage:
-    flowforge setup              # Configure provider and model
-    flowforge "Build a web app"  # Run pipeline with prompt
-    flowforge "idea" --repo name # Run and push to GitHub repo
+    flowforge-ai setup              # Configure provider and model
+    flowforge-ai "Build a web app"  # Run pipeline with prompt
+    flowforge-ai "idea" --repo name # Run and push to GitHub repo
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ from flowforge.cli.config import CONFIG_DIR, FlowForgeConfig
 class FlowForgeGroup(click.Group):
     """Custom group that resolves subcommands before consuming the prompt argument.
 
-    This allows `flowforge "prompt"` to work as a shortcut for `flowforge run "prompt"`,
-    while `flowforge setup` correctly routes to the setup subcommand.
+    This allows `flowforge-ai "prompt"` to work as a shortcut for `flowforge-ai run "prompt"`,
+    while `flowforge-ai setup` correctly routes to the setup subcommand.
     """
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
@@ -39,11 +39,11 @@ def cli() -> None:
 
     Run with a prompt to generate code:
 
-        flowforge "Build a REST API with FastAPI"
+        swe-forge "Build a REST API with FastAPI"
 
     Or use subcommands:
 
-        flowforge setup    Configure provider and model
+        swe-forge setup    Configure provider and model
     """
 
 
@@ -57,9 +57,9 @@ def run(prompt: str, repo: str | None, skip_github: bool, no_studio: bool) -> No
 
     Examples:
 
-        flowforge "Build a REST API with FastAPI"
+        flowforge-ai "Build a REST API with FastAPI"
 
-        flowforge run "Build a CLI tool" --repo my-tool
+        flowforge-ai run "Build a CLI tool" --repo my-tool
     """
     # Ensure setup has been run
     if not FlowForgeConfig.exists():

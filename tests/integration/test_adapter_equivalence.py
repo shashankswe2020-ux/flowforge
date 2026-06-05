@@ -6,9 +6,9 @@ canonical state transitions and terminal outcomes.
 
 from __future__ import annotations
 
-from src.adapters.claude_code import ClaudeCodeAdapter
-from src.adapters.codex import CodexAdapter
-from src.adapters.copilot import CopilotAdapter
+from flowforge.adapters.claude_code import ClaudeCodeAdapter
+from flowforge.adapters.codex import CodexAdapter
+from flowforge.adapters.copilot import CopilotAdapter
 
 
 def _copilot_input() -> dict[str, object]:
@@ -187,7 +187,7 @@ class TestAdapterRuntimeSelection:
 
     def test_all_adapters_share_base_interface(self) -> None:
         """All adapters expose the same interface methods."""
-        from src.adapters.base import AdapterBase
+        from flowforge.adapters.base import AdapterBase
 
         adapters = [CopilotAdapter(), CodexAdapter(), ClaudeCodeAdapter()]
         for adapter in adapters:

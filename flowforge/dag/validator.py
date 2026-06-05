@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 
-from src.state.models import TaskDAG
+from flowforge.state.models import TaskDAG
 
 
 class CyclicDAGError(Exception):

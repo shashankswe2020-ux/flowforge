@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.graph.loopback import (
+from flowforge.graph.loopback import (
     MAX_QUALITY_ITERATIONS,
     LoopbackDecision,
     LoopbackExceededError,
@@ -12,7 +12,7 @@ from src.graph.loopback import (
     decide_loopback,
     execute_loopback,
 )
-from src.state.models import (
+from flowforge.state.models import (
     CapabilityType,
     GraphState,
     ImplementationPlan,

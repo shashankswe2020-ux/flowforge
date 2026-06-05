@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from src.dag.validator import CyclicDAGError, validate_dag
-from src.nodes.plan import SpecMissingError, plan_node
-from src.state.models import (
+from flowforge.dag.validator import CyclicDAGError, validate_dag
+from flowforge.nodes.plan import SpecMissingError, plan_node
+from flowforge.state.models import (
     GraphState,
     ImplementationPlan,
     RunStatus,

@@ -14,7 +14,7 @@ from langgraph.graph import END, START, StateGraph
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
-from src.nodes.stubs import (
+from flowforge.nodes.stubs import (
     clarification_node as stub_clarification,
     code_review_node as stub_code_review,
     issue_orchestrator_node as stub_issue_orchestrator,
@@ -28,7 +28,7 @@ from src.nodes.stubs import (
     task_node as stub_task,
     test_engineer_node as stub_test_engineer,
 )
-from src.state.models import GraphState
+from flowforge.state.models import GraphState
 
 
 def build_graph() -> CompiledStateGraph:  # type: ignore[type-arg]
@@ -92,13 +92,13 @@ def build_real_graph(llm: Any) -> CompiledStateGraph:  # type: ignore[type-arg]
     Args:
         llm: An object implementing invoke(prompt) -> response with .content attribute.
     """
-    from src.nodes.clarification import clarification_node
-    from src.nodes.code_review import code_review_node
-    from src.nodes.issue_orchestrator import issue_orchestrator_node
-    from src.nodes.plan import plan_node
-    from src.nodes.security_audit import security_audit_node
-    from src.nodes.ship import ship_node
-    from src.nodes.spec import spec_node
+    from flowforge.nodes.clarification import clarification_node
+    from flowforge.nodes.code_review import code_review_node
+    from flowforge.nodes.issue_orchestrator import issue_orchestrator_node
+    from flowforge.nodes.plan import plan_node
+    from flowforge.nodes.security_audit import security_audit_node
+    from flowforge.nodes.ship import ship_node
+    from flowforge.nodes.spec import spec_node
 
     # Create node wrappers that inject the LLM
     def real_clarification(state: GraphState) -> dict[str, Any]:
@@ -114,7 +114,7 @@ def build_real_graph(llm: Any) -> CompiledStateGraph:  # type: ignore[type-arg]
         return code_review_node(state, llm=llm)
 
     def real_security_audit(state: GraphState) -> dict[str, Any]:
-        from src.nodes.security_audit import security_audit_node as sa_node
+        from flowforge.nodes.security_audit import security_audit_node as sa_node
 
         return sa_node(state, llm=llm)
 

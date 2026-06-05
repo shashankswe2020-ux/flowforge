@@ -15,8 +15,8 @@ import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from src.state.models import ToolSideEffect
-from src.tools.allowlist import ToolAllowlist
+from flowforge.state.models import ToolSideEffect
+from flowforge.tools.allowlist import ToolAllowlist
 
 
 class ToolNotAllowedError(Exception):

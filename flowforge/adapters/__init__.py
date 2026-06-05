@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.adapters.base import AdapterBase, IntegrationError, RateLimitPolicy
-from src.adapters.schemas import CanonicalRequest, CanonicalResponse
+from flowforge.adapters.base import AdapterBase, IntegrationError, RateLimitPolicy
+from flowforge.adapters.schemas import CanonicalRequest, CanonicalResponse
 
 __all__ = [
     "AdapterBase",

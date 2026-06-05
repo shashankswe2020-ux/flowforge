@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from src.graph.builder import build_graph
-from src.nodes.stubs import NODE_IDS
-from src.state.models import GraphState, RunStatus
+from flowforge.graph.builder import build_graph
+from flowforge.nodes.stubs import NODE_IDS
+from flowforge.state.models import GraphState, RunStatus
 
 
 class TestGraphCompilation:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.scheduler.router import compute_next_runnable, dispatch_tasks
-from src.state.models import (
+from flowforge.scheduler.router import compute_next_runnable, dispatch_tasks
+from flowforge.state.models import (
     CapabilityType,
     GraphState,
     ImplementationPlan,

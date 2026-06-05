@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.state.models import (
+from flowforge.state.models import (
     GraphState,
     IssueDisposition,
     IssueSeverity,
@@ -468,7 +468,7 @@ def ship_node(
         }
 
     # --- Ship: generate documentation and version ---
-    from src.nodes._workspace import get_workdir
+    from flowforge.nodes._workspace import get_workdir
 
     workdir = get_workdir(state)
     current_version = _get_current_version(workdir)

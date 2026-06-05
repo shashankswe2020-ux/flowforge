@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from src.nodes.security_audit import security_audit_node
-from src.state.models import (
+from flowforge.nodes.security_audit import security_audit_node
+from flowforge.state.models import (
     CapabilityType,
     Finding,
     GraphState,

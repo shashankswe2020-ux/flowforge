@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.state.errors import IllegalTransitionError
-from src.state.models import RunStatus, TaskStatus
+from flowforge.state.errors import IllegalTransitionError
+from flowforge.state.models import RunStatus, TaskStatus
 
 # Legal transitions per the spec state machine
 _RUN_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.shipping.github import (
+from flowforge.shipping.github import (
     GitHubResult,
     GitHubShipError,
     check_gh_auth,
@@ -57,12 +57,12 @@ class TestComputeFileFingerprint:
 
 
 class TestCheckGhAuth:
-    @patch("src.shipping.github._run")
+    @patch("flowforge.shipping.github._run")
     def test_returns_true_when_authenticated(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(returncode=0)
         assert check_gh_auth() is True
 
-    @patch("src.shipping.github._run")
+    @patch("flowforge.shipping.github._run")
     def test_returns_false_on_error(self, mock_run: MagicMock) -> None:
         mock_run.side_effect = GitHubShipError("not logged in")
         assert check_gh_auth() is False
@@ -81,7 +81,7 @@ class TestRepoExists:
 
 
 class TestCreateRepo:
-    @patch("src.shipping.github._run")
+    @patch("flowforge.shipping.github._run")
     def test_creates_private_repo(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(
             stdout=json.dumps({"url": "https://github.com/owner/repo"})
@@ -93,7 +93,7 @@ class TestCreateRepo:
 
 
 class TestGetRepoUrl:
-    @patch("src.shipping.github._run")
+    @patch("flowforge.shipping.github._run")
     def test_returns_url(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(
             stdout=json.dumps({"url": "https://github.com/owner/repo"})
@@ -103,7 +103,7 @@ class TestGetRepoUrl:
 
 
 class TestInitAndCommit:
-    @patch("src.shipping.github._run")
+    @patch("flowforge.shipping.github._run")
     def test_returns_commit_sha(self, mock_run: MagicMock) -> None:
         mock_run.return_value = MagicMock(stdout="abc123def456\n")
         sha = init_and_commit(Path("/tmp/test"))
@@ -113,11 +113,11 @@ class TestInitAndCommit:
 
 
 class TestShipToGithub:
-    @patch("src.shipping.github.push_to_remote")
-    @patch("src.shipping.github.init_and_commit")
-    @patch("src.shipping.github.repo_exists")
-    @patch("src.shipping.github.create_repo")
-    @patch("src.shipping.github.check_gh_auth")
+    @patch("flowforge.shipping.github.push_to_remote")
+    @patch("flowforge.shipping.github.init_and_commit")
+    @patch("flowforge.shipping.github.repo_exists")
+    @patch("flowforge.shipping.github.create_repo")
+    @patch("flowforge.shipping.github.check_gh_auth")
     def test_creates_repo_and_ships(
         self,
         mock_auth: MagicMock,
@@ -140,7 +140,7 @@ class TestShipToGithub:
         assert result.commit_sha == "abc123"
         assert "main.py" in result.files_committed
 
-    @patch("src.shipping.github.check_gh_auth")
+    @patch("flowforge.shipping.github.check_gh_auth")
     def test_fails_without_auth(self, mock_auth: MagicMock, tmp_path: Path) -> None:
         mock_auth.return_value = False
         with pytest.raises(GitHubShipError, match="not authenticated"):

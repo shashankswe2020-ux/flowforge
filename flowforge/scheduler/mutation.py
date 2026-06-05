@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.scheduler.revision_lock import RevisionLock
-from src.state.models import (
+from flowforge.scheduler.revision_lock import RevisionLock
+from flowforge.state.models import (
     Task,
     TaskDAG,
     TaskDefinition,

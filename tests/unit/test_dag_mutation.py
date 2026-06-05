@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from src.scheduler.mutation import (
+from flowforge.scheduler.mutation import (
     ImmutableTaskError,
     MutationResult,
     append_tasks,
     reconcile_inflight,
 )
-from src.scheduler.revision_lock import RevisionLock
-from src.state.models import (
+from flowforge.scheduler.revision_lock import RevisionLock
+from flowforge.state.models import (
     CapabilityType,
     Task,
     TaskDAG,
@@ -158,7 +158,7 @@ class TestRevisionLockIntegration:
         tasks = [_make_task("t1"), _make_task("t2")]
         lock = RevisionLock()  # not acquired
 
-        from src.scheduler.revision_lock import StaleRevisionError
+        from flowforge.scheduler.revision_lock import StaleRevisionError
 
         with pytest.raises(StaleRevisionError):
             append_tasks(
@@ -180,7 +180,7 @@ class TestRevisionLockIntegration:
         lock = RevisionLock()
         lock.acquire(revision=2)  # stale — DAG is at rev 3
 
-        from src.scheduler.revision_lock import StaleRevisionError
+        from flowforge.scheduler.revision_lock import StaleRevisionError
 
         with pytest.raises(StaleRevisionError):
             append_tasks(

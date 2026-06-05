@@ -13,8 +13,8 @@ import json
 
 from langchain_openai import ChatOpenAI
 
-from src.adapters.copilot import CopilotAdapter
-from src.state.models import (
+from flowforge.adapters.copilot import CopilotAdapter
+from flowforge.state.models import (
     GraphState,
     RunStatus,
     ClarificationTranscript,
@@ -104,7 +104,7 @@ def main() -> None:
 
     # Step 3: Clarification Node (real LLM)
     print("━━━ Step 3: Clarification Node (real LLM) ━━━")
-    from src.nodes.clarification import clarification_node
+    from flowforge.nodes.clarification import clarification_node
     from datetime import datetime, UTC
 
     state = GraphState(
@@ -181,7 +181,7 @@ def main() -> None:
     plan_response = llm.invoke(plan_prompt)
     plan_data = extract_json(plan_response.content)
 
-    from src.state.models import TaskDAG, TaskDefinition, TaskDependency, ImplementationPlan
+    from flowforge.state.models import TaskDAG, TaskDefinition, TaskDependency, ImplementationPlan
 
     task_defs = [
         TaskDefinition(**t) for t in plan_data["tasks"]
@@ -202,15 +202,15 @@ def main() -> None:
 
     # Step 6: DAG Validation
     print("━━━ Step 6: DAG Validation ━━━")
-    from src.dag.validator import validate_dag
+    from flowforge.dag.validator import validate_dag
     validate_dag(dag)
     print("  ✓ DAG is acyclic (Kahn's algorithm passed)")
     print()
 
     # Step 7: Scheduler — compute runnable tasks
     print("━━━ Step 7: Scheduler — Compute Runnable Tasks ━━━")
-    from src.scheduler.router import compute_next_runnable
-    from src.state.models import Task
+    from flowforge.scheduler.router import compute_next_runnable
+    from flowforge.state.models import Task
 
     tasks = [Task(task_id=td.task_id, definition=td) for td in task_defs]
     runnable = compute_next_runnable(dag, tasks)
@@ -219,7 +219,7 @@ def main() -> None:
 
     # Step 8: Code Review Node (real LLM — direct call)
     print("━━━ Step 8: Code Review Node (real LLM) ━━━")
-    from src.state.models import TaskArtifact, TaskStatus, Finding, IssueSeverity
+    from flowforge.state.models import TaskArtifact, TaskStatus, Finding, IssueSeverity
 
     review_prompt = (
         "You are a code reviewer. Review a Python web scraper file 'scraper.py'.\n"
@@ -251,8 +251,8 @@ def main() -> None:
 
     # Step 9: Ship Node — readiness check
     print("━━━ Step 9: Ship Node — Readiness Gate ━━━")
-    from src.nodes.ship import ship_node
-    from src.state.models import Task, TaskArtifact, TaskStatus
+    from flowforge.nodes.ship import ship_node
+    from flowforge.state.models import Task, TaskArtifact, TaskStatus
 
     demo_task = Task(
         task_id="t1",

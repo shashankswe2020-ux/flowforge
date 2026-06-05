@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.state.models import CapabilityType, GraphState
+from flowforge.state.models import CapabilityType, GraphState
 
 # System fallback when no user config is provided
 _SYSTEM_FALLBACK_MODEL_ID = "gpt-4o"

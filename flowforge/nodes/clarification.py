@@ -10,7 +10,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from src.state.models import (
+from flowforge.state.models import (
     AmbiguityStatus,
     ClarificationQA,
     ClarificationTranscript,

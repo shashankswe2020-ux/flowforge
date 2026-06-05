@@ -18,7 +18,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.state.models import Finding, GraphState, IssueSeverity, TaskDefinition
+from flowforge.state.models import Finding, GraphState, IssueSeverity, TaskDefinition
 
 
 class LLMProtocol(Protocol):
@@ -309,7 +309,7 @@ def _commit_report_to_repo(
     state: GraphState,
 ) -> None:
     """Write test report to ``<workdir>/docs/test-reports/`` and commit to git."""
-    from src.nodes._workspace import get_workdir
+    from flowforge.nodes._workspace import get_workdir
 
     workdir = get_workdir(state)
     cwd = str(workdir)
@@ -347,7 +347,7 @@ def _create_github_issues(findings: list[Finding], state: GraphState) -> None:
     Skips silently if gh is unavailable.
     Runs from ``state.workdir`` so issues target the project's repo.
     """
-    from src.nodes._workspace import get_workdir
+    from flowforge.nodes._workspace import get_workdir
 
     cwd = str(get_workdir(state))
 

@@ -16,7 +16,7 @@ from pathlib import Path
 
 from langchain_openai import ChatOpenAI
 
-from src.runner.pipeline import PipelineRunner
+from flowforge.runner.pipeline import PipelineRunner
 
 
 def get_github_token() -> str:

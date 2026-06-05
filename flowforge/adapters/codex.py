@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.adapters.base import AdapterBase, IntegrationError
-from src.adapters.schemas import CanonicalRequest, CanonicalResponse
+from flowforge.adapters.base import AdapterBase, IntegrationError
+from flowforge.adapters.schemas import CanonicalRequest, CanonicalResponse
 
 
 class CodexAdapter(AdapterBase):

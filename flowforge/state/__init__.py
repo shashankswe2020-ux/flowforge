@@ -1,6 +1,6 @@
 """State model package for FlowForge graph state definitions."""
 
-from src.state.models import (
+from flowforge.state.models import (
     AmbiguityStatus,
     ClarificationTranscript,
     ClarifiedRequest,

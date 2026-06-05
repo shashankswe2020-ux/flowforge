@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from src.nodes.spec import ClarificationIncompleteError, spec_node
-from src.state.models import (
+from flowforge.nodes.spec import ClarificationIncompleteError, spec_node
+from flowforge.state.models import (
     AmbiguityStatus,
     ClarifiedRequest,
     GraphState,

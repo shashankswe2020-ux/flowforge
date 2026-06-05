@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from src.state.models import (
+from flowforge.state.models import (
     Task,
     TaskArtifact,
     TaskStatus,

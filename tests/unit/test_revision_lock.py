@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.scheduler.revision_lock import (
+from flowforge.scheduler.revision_lock import (
     RevisionLock,
     StaleRevisionError,
 )

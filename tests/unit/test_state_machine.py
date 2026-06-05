@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from src.state.errors import IllegalTransitionError
-from src.state.machine import validate_run_transition, validate_task_transition
-from src.state.models import RunStatus, TaskStatus
+from flowforge.state.errors import IllegalTransitionError
+from flowforge.state.machine import validate_run_transition, validate_task_transition
+from flowforge.state.models import RunStatus, TaskStatus
 
 
 class TestRunTransitions:

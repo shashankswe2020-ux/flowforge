@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from src.adapters.base import (
+from flowforge.adapters.base import (
     AdapterBase,
     IntegrationError,
     RateLimitExceededError,
     RateLimitPolicy,
 )
-from src.adapters.schemas import (
+from flowforge.adapters.schemas import (
     CanonicalRequest,
     CanonicalResponse,
     ExecutionPolicy,

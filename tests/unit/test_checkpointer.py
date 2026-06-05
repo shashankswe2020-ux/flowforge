@@ -6,12 +6,12 @@ from unittest.mock import patch
 
 import pytest
 
-from src.persistence.checkpointer import CheckpointerBackend, CheckpointerWrapper
-from src.persistence.errors import (
+from flowforge.persistence.checkpointer import CheckpointerBackend, CheckpointerWrapper
+from flowforge.persistence.errors import (
     CheckpointerMidRunUnavailableError,
     CheckpointerUnavailableError,
 )
-from src.state.models import RunStatus
+from flowforge.state.models import RunStatus
 from tests.factories import make_state
 
 

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from src.nodes.clarification import (
+from flowforge.nodes.clarification import (
     REQUIRED_DIMENSIONS,
     clarification_node,
 )
-from src.state.models import (
+from flowforge.state.models import (
     AmbiguityStatus,
     ClarificationQA,
     ClarificationTranscript,

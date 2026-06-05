@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from src.state.models import (
+from flowforge.state.models import (
     AmbiguityStatus,
     ClarifiedRequest,
     Finding,
@@ -36,7 +36,7 @@ from src.state.models import (
     TaskDependency,
     TaskStatus,
 )
-from src.shipping.github import (
+from flowforge.shipping.github import (
     GitHubResult,
     compute_file_fingerprint,
     ship_to_github,
@@ -334,7 +334,7 @@ class PipelineRunner:
         ]
         dag = TaskDAG(tasks=tasks, edges=edges, plan_revision=1)
 
-        from src.dag.validator import validate_dag
+        from flowforge.dag.validator import validate_dag
 
         validate_dag(dag)
 

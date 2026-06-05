@@ -12,7 +12,7 @@ from pathlib import Path
 
 import click
 
-from src.cli.config import CONFIG_DIR, FlowForgeConfig
+from flowforge.cli.config import CONFIG_DIR, FlowForgeConfig
 
 
 class FlowForgeGroup(click.Group):
@@ -151,7 +151,7 @@ def _run_pipeline(
     import sys
     import time
 
-    from src.cli.config import FlowForgeConfig
+    from flowforge.cli.config import FlowForgeConfig
 
     config = FlowForgeConfig.load()
 
@@ -248,7 +248,7 @@ def _prepare_workspace(
     import subprocess
     from pathlib import Path
 
-    from src.nodes._workspace import slugify
+    from flowforge.nodes._workspace import slugify
 
     name = repo or slugify(prompt)
     workspace_root = Path.home() / "flowforge-workspace"

@@ -12,14 +12,14 @@ enforces schema validation, and ensures sole-writer semantics.
 
 from __future__ import annotations
 
-from src.nodes.capability import (
+from flowforge.nodes.capability import (
     AgentOnlyExecutor,
     AgentWithToolsExecutor,
     DirectToolExecutor,
     LLMProtocol,
     TaskExecutionResult,
 )
-from src.state.models import CapabilityType, Task
+from flowforge.state.models import CapabilityType, Task
 
 
 def execute_task(

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from src.nodes.code_review import code_review_node
-from src.state.models import (
+from flowforge.nodes.code_review import code_review_node
+from flowforge.state.models import (
     CapabilityType,
     Finding,
     GraphState,

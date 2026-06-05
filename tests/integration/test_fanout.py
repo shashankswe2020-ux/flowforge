@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from src.scheduler.mutation import append_tasks
-from src.scheduler.revision_lock import RevisionLock
-from src.scheduler.router import compute_next_runnable, dispatch_tasks
-from src.state.models import (
+from flowforge.scheduler.mutation import append_tasks
+from flowforge.scheduler.revision_lock import RevisionLock
+from flowforge.scheduler.router import compute_next_runnable, dispatch_tasks
+from flowforge.state.models import (
     CapabilityType,
     GraphState,
     ImplementationPlan,

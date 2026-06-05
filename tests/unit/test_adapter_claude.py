@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from src.adapters.claude_code import ClaudeCodeAdapter
-from src.adapters.copilot import CopilotAdapter
-from src.adapters.schemas import CanonicalRequest, CanonicalResponse
+from flowforge.adapters.claude_code import ClaudeCodeAdapter
+from flowforge.adapters.copilot import CopilotAdapter
+from flowforge.adapters.schemas import CanonicalRequest, CanonicalResponse
 
 
 def _claude_input(

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 
-from src.nodes.issue_orchestrator import (
+from flowforge.nodes.issue_orchestrator import (
     _classify_category,
     _prioritize,
     compute_fingerprint,
     issue_orchestrator_node,
     merge_findings,
 )
-from src.state.models import (
+from flowforge.state.models import (
     Finding,
     GraphState,
     Issue,
@@ -317,7 +317,7 @@ class TestPrioritization:
                          severity=IssueSeverity.MEDIUM, title="App crash on click")
         f_test = _finding(finding_id="t1", source_node="test_engineer_node",
                           severity=IssueSeverity.LOW, title="Missing test")
-        from src.nodes.issue_orchestrator import _deduplicate
+        from flowforge.nodes.issue_orchestrator import _deduplicate
         deduped = _deduplicate([f_sec, f_bug, f_test])
         prioritized = _prioritize(deduped)
         categories = [cat for _, _, cat in prioritized]

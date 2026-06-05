@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from src.nodes.test_engineer import test_engineer_node
-from src.state.models import (
+from flowforge.nodes.test_engineer import test_engineer_node
+from flowforge.state.models import (
     CapabilityType,
     Finding,
     GraphState,

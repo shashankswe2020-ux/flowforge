@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from src.state.models import ToolSideEffect
-from src.tools.allowlist import ToolAllowlist, ToolDefinition
-from src.tools.policy import (
+from flowforge.state.models import ToolSideEffect
+from flowforge.tools.allowlist import ToolAllowlist, ToolDefinition
+from flowforge.tools.policy import (
     DestructiveToolBlockedError,
     PathTraversalError,
     ToolNotAllowedError,

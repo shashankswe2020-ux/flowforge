@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from src.state.models import (
+from flowforge.state.models import (
     AmbiguityStatus,
     CapabilityType,
     ClarificationQA,

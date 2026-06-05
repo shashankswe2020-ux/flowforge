@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.state.models import GraphState, RunStatus
+from flowforge.state.models import GraphState, RunStatus
 
 # Canonical node IDs per spec
 NODE_IDS: tuple[str, ...] = (

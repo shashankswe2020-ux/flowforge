@@ -11,8 +11,8 @@ from collections import deque
 from enum import StrEnum
 from typing import Any
 
-from src.scheduler.revision_lock import RevisionLock
-from src.state.models import (
+from flowforge.scheduler.revision_lock import RevisionLock
+from flowforge.state.models import (
     GraphState,
     ImplementationPlan,
     Task,

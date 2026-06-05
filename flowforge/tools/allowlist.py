@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.state.models import ToolSideEffect
+from flowforge.state.models import ToolSideEffect
 
 
 @dataclass(frozen=True)

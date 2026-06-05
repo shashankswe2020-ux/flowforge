@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
-from src.state.models import GraphState, RunStatus, SpecOutput
+from flowforge.state.models import GraphState, RunStatus, SpecOutput
 
 
 class LLMProtocol(Protocol):
@@ -348,7 +348,7 @@ def _commit_spec_to_repo(spec: SpecOutput, state: GraphState) -> None:
     import subprocess
     from pathlib import Path
 
-    from src.nodes._workspace import get_workdir
+    from flowforge.nodes._workspace import get_workdir
 
     workdir = get_workdir(state)
     cwd = str(workdir)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.state.models import (
+from flowforge.state.models import (
     GraphState,
     RunStatus,
     TaskStatus,

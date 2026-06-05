@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.nodes.idempotency import (
+from flowforge.nodes.idempotency import (
     DuplicateExecutionError,
     IdempotencyStore,
     SideEffectType,

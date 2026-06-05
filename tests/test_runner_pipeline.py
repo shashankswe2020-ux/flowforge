@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.runner.pipeline import PipelineRunner, PipelineResult, extract_json
-from src.state.models import RunStatus
+from flowforge.runner.pipeline import PipelineRunner, PipelineResult, extract_json
+from flowforge.state.models import RunStatus
 
 
 class MockLLMResponse:
@@ -166,9 +166,9 @@ class TestPipelineRunner:
         )
         assert result.succeeded
 
-    @patch("src.runner.pipeline.ship_to_github")
+    @patch("flowforge.runner.pipeline.ship_to_github")
     def test_run_with_github(self, mock_ship: MagicMock, tmp_path: Path) -> None:
-        from src.shipping.github import GitHubResult
+        from flowforge.shipping.github import GitHubResult
 
         mock_ship.return_value = GitHubResult(
             repo_url="https://github.com/user/test",

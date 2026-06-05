@@ -18,7 +18,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.state.models import Finding, GraphState, IssueSeverity
+from flowforge.state.models import Finding, GraphState, IssueSeverity
 
 
 class LLMProtocol(Protocol):
@@ -283,7 +283,7 @@ def _commit_review_to_repo(
     findings: list[Finding], metadata: dict[str, Any], state: GraphState
 ) -> None:
     """Write review markdown to ``<workdir>/docs/reviews/`` and commit to git."""
-    from src.nodes._workspace import get_workdir
+    from flowforge.nodes._workspace import get_workdir
 
     workdir = get_workdir(state)
     cwd = str(workdir)
@@ -320,7 +320,7 @@ def _create_github_issues(findings: list[Finding], state: GraphState) -> None:
     Labels issues with 'issue-by-code-review'. Skips silently if gh is unavailable.
     Runs from ``state.workdir`` so issues target the project's repo.
     """
-    from src.nodes._workspace import get_workdir
+    from flowforge.nodes._workspace import get_workdir
 
     cwd = str(get_workdir(state))
 

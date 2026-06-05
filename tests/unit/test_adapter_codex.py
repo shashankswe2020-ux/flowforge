@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from src.adapters.codex import CodexAdapter
-from src.adapters.copilot import CopilotAdapter
-from src.adapters.schemas import CanonicalRequest, CanonicalResponse
+from flowforge.adapters.codex import CodexAdapter
+from flowforge.adapters.copilot import CopilotAdapter
+from flowforge.adapters.schemas import CanonicalRequest, CanonicalResponse
 
 
 def _codex_input(

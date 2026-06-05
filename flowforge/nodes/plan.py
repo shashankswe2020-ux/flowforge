@@ -18,8 +18,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.dag.validator import validate_dag
-from src.state.models import (
+from flowforge.dag.validator import validate_dag
+from flowforge.state.models import (
     GraphState,
     ImplementationPlan,
     RunStatus,
@@ -376,7 +376,7 @@ def _commit_plan_to_repo(
     parsed: dict[str, Any], plan: ImplementationPlan, state: GraphState
 ) -> None:
     """Write plan markdown to ``<workdir>/docs/plans/`` and commit to git."""
-    from src.nodes._workspace import get_workdir
+    from flowforge.nodes._workspace import get_workdir
 
     workdir = get_workdir(state)
     cwd = str(workdir)

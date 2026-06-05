@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from src.adapters.copilot import CopilotAdapter
-from src.adapters.schemas import CanonicalRequest, CanonicalResponse
+from flowforge.adapters.copilot import CopilotAdapter
+from flowforge.adapters.schemas import CanonicalRequest, CanonicalResponse
 
 
 def _copilot_input(

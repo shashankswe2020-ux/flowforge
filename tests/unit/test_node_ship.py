@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from src.nodes.ship import (
+from flowforge.nodes.ship import (
     _determine_next_version,
     _generate_changelog_entry,
     _generate_readme,
@@ -14,7 +14,7 @@ from src.nodes.ship import (
     check_readiness,
     ship_node,
 )
-from src.state.models import (
+from flowforge.state.models import (
     GraphState,
     Issue,
     IssueDisposition,
@@ -268,7 +268,7 @@ class TestVersioning:
         assert next_ver == "1.2.4"
 
     def test_breaking_change_bumps_major(self) -> None:
-        from src.state.models import Finding
+        from flowforge.state.models import Finding
         state = GraphState(
             request="Build API",
             run_status=RunStatus.RUNNING,
@@ -287,7 +287,7 @@ class TestVersioning:
         assert next_ver == "2.0.0"
 
     def test_breaking_change_v0_bumps_minor(self) -> None:
-        from src.state.models import Finding
+        from flowforge.state.models import Finding
         state = GraphState(
             request="Build API",
             run_status=RunStatus.RUNNING,
@@ -378,9 +378,9 @@ class TestDocGeneration:
 class TestShipWithLLM:
     """ship_node with LLM generates docs and versions."""
 
-    @patch("src.nodes.ship._commit_release_artifacts", return_value="abc123")
-    @patch("src.nodes.ship._create_git_tag", return_value=True)
-    @patch("src.nodes.ship._update_version_in_pyproject", return_value=True)
+    @patch("flowforge.nodes.ship._commit_release_artifacts", return_value="abc123")
+    @patch("flowforge.nodes.ship._create_git_tag", return_value=True)
+    @patch("flowforge.nodes.ship._update_version_in_pyproject", return_value=True)
     def test_ship_generates_readme_and_changelog(
         self, mock_version, mock_tag, mock_commit, tmp_path, monkeypatch,
     ) -> None:
@@ -421,8 +421,8 @@ class TestShipWithLLM:
             ],
         )
         llm = MockLLM(responses=["# README", "## [1.1.0]"])
-        with patch("src.nodes.ship._commit_release_artifacts", return_value=None), \
-             patch("src.nodes.ship._create_git_tag", return_value=False):
+        with patch("flowforge.nodes.ship._commit_release_artifacts", return_value=None), \
+             patch("flowforge.nodes.ship._create_git_tag", return_value=False):
             result = ship_node(state, production_mode=False, llm=llm)
         provenance = result["shipping_result"].provenance_chain
         assert "version:1.1.0" in provenance

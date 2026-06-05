@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from src.state.models import GraphState
+from flowforge.state.models import GraphState
 
 
 def get_workdir(state: GraphState) -> Path:

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 
-from src.nodes.capability import (
+from flowforge.nodes.capability import (
     AgentOnlyExecutor,
     AgentWithToolsExecutor,
     DirectToolExecutor,
 )
-from src.nodes.task_executor import execute_task
-from src.state.models import (
+from flowforge.nodes.task_executor import execute_task
+from flowforge.state.models import (
     CapabilityType,
     Task,
     TaskDefinition,

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.config.model_selection import (
+from flowforge.config.model_selection import (
     InvalidModelConfigError,
     resolve_model,
 )
-from src.state.models import (
+from flowforge.state.models import (
     CapabilityType,
     DefaultModelConfig,
     GraphState,

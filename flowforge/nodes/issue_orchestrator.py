@@ -22,7 +22,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.state.models import (
+from flowforge.state.models import (
     Finding,
     GraphState,
     Issue,
@@ -340,7 +340,7 @@ def _commit_triage_to_repo(
     state: GraphState,
 ) -> None:
     """Commit triage report markdown to ``<workdir>/docs/triage/``."""
-    from src.nodes._workspace import get_workdir
+    from flowforge.nodes._workspace import get_workdir
 
     workdir = get_workdir(state)
     cwd = str(workdir)
@@ -375,7 +375,7 @@ def _create_github_issues(
     Uses gh CLI. Labels with 'issue-by-orchestrator' + category-specific labels.
     Runs from ``state.workdir`` so issues target the project's repo.
     """
-    from src.nodes._workspace import get_workdir
+    from flowforge.nodes._workspace import get_workdir
 
     cwd = str(get_workdir(state))
 

@@ -5,13 +5,13 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from src.persistence.errors import (
+from flowforge.persistence.errors import (
     CheckpointerMidRunUnavailableError,
     CheckpointerUnavailableError,
 )
 
 if TYPE_CHECKING:
-    from src.state.models import GraphState
+    from flowforge.state.models import GraphState
 
 
 class CheckpointerBackend(StrEnum):
@@ -128,7 +128,7 @@ class CheckpointerWrapper:
 
     def _do_load(self, run_id: str) -> GraphState | None:
         """Internal load logic. Override for real backends."""
-        from src.state.models import GraphState
+        from flowforge.state.models import GraphState
 
         raw = self._store.get(run_id)
         if raw is None:

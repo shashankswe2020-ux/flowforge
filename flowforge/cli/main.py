@@ -528,13 +528,18 @@ def _invoke_graph(
             tasks = payload.get("tasks") or []
             if isinstance(tasks, list) and tasks:
                 statuses: dict[str, int] = {}
+                artifact_count = 0
                 for t in tasks:
                     if isinstance(t, dict):
                         s = t.get("status", "?")
                         statuses[s] = statuses.get(s, 0) + 1
+                        arts = t.get("artifacts") or []
+                        if isinstance(arts, list):
+                            artifact_count += len(arts)
                 lines.append(
                     f"{len(tasks)} tasks: "
                     + ", ".join(f"{k}={v}" for k, v in sorted(statuses.items()))
+                    + (f" | {artifact_count} artifacts" if artifact_count else "")
                 )
 
         # --- quality gate nodes ---
@@ -570,10 +575,6 @@ def _invoke_graph(
                     f"{len(issues)} triaged: "
                     + (", ".join(f"{k}={v}" for k, v in sorted(by_disp.items())) or "—")
                 )
-            ready = payload.get("shipping_readiness") or {}
-            if isinstance(ready, dict):
-                blockers = ready.get("blockers") or []
-                lines.append(f"shipping_ready={ready.get('is_ready', False)} ({len(blockers)} blockers)")
 
         # --- ship_node ---
         if node_name == "ship_node":

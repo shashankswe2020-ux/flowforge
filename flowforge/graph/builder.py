@@ -99,6 +99,8 @@ def build_real_graph(llm: Any) -> CompiledStateGraph:  # type: ignore[type-arg]
     from flowforge.nodes.security_audit import security_audit_node
     from flowforge.nodes.ship import ship_node
     from flowforge.nodes.spec import spec_node
+    from flowforge.nodes.task_runner import task_node as real_task_node
+    from flowforge.nodes.test_engineer import test_engineer_node
 
     # Create node wrappers that inject the LLM
     def real_clarification(state: GraphState) -> dict[str, Any]:
@@ -110,6 +112,9 @@ def build_real_graph(llm: Any) -> CompiledStateGraph:  # type: ignore[type-arg]
     def real_plan(state: GraphState) -> dict[str, Any]:
         return plan_node(state, llm=llm)
 
+    def real_task(state: GraphState) -> dict[str, Any]:
+        return real_task_node(state, llm=llm)
+
     def real_code_review(state: GraphState) -> dict[str, Any]:
         return code_review_node(state, llm=llm)
 
@@ -119,7 +124,7 @@ def build_real_graph(llm: Any) -> CompiledStateGraph:  # type: ignore[type-arg]
         return sa_node(state, llm=llm)
 
     def real_test_engineer(state: GraphState) -> dict[str, Any]:
-        return {"test_findings": []}  # No test execution in current scope
+        return test_engineer_node(state, llm=llm)
 
     def real_issue_orchestrator(state: GraphState) -> dict[str, Any]:
         return issue_orchestrator_node(state, llm=llm)
@@ -133,7 +138,7 @@ def build_real_graph(llm: Any) -> CompiledStateGraph:  # type: ignore[type-arg]
     graph.add_node("spec_node", real_spec)
     graph.add_node("plan_node", real_plan)
     graph.add_node("task_fanout_router", task_fanout_router)
-    graph.add_node("task_node", stub_task)  # Task execution handled by PipelineRunner
+    graph.add_node("task_node", real_task)
     graph.add_node("quality_gate_join", quality_gate_join)
     graph.add_node("code_review_node", real_code_review)
     graph.add_node("security_audit_node", real_security_audit)

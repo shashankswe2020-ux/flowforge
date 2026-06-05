@@ -2,7 +2,7 @@
 
 ## Summary
 
-REST API spec for user management
+API for managing users
 
 ## Acceptance Criteria
 
@@ -15,5 +15,5 @@ REST API spec for user management
 > These assumptions were surfaced during spec generation.
 > Correct them now if they're wrong.
 
-- Docker available
-- Redis for caching
+- Python 3.12+ runtime
+- PostgreSQL 15+ available

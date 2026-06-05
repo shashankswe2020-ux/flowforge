@@ -34,33 +34,85 @@ class FlowForgeGroup(click.Group):
         return super().parse_args(ctx, args)
 
 
-@click.group(cls=FlowForgeGroup)
+def _get_version() -> str:
+    """Return the installed swe-forge package version."""
+    try:
+        from importlib.metadata import version
+        return version("swe-forge")
+    except Exception:
+        return "unknown"
+
+
+@click.group(cls=FlowForgeGroup, context_settings={"help_option_names": ["-h", "--help"]})
+@click.version_option(_get_version(), "-V", "--version", prog_name="swe-forge")
 def cli() -> None:
-    """FlowForge — AI-powered code generation pipeline.
+    """FlowForge — multi-agent LangGraph pipeline for autonomous software development.
 
-    Run with a prompt to generate code:
+    Takes a one-line prompt and runs it through a 10-node graph
+    (clarify → spec → plan → fan-out tasks → parallel quality gates
+    → issue triage → ship), commits artifacts to a feature branch on a
+    fresh GitHub repo, files issues for every finding, and opens a PR.
 
-        swe-forge "Build a REST API with FastAPI"
+    \b
+    Quick start:
+      swe-forge setup                          Configure provider + model (one-time)
+      swe-forge run "build tic-tac-toe app"    Generate code + push + open PR
+      swe-forge run "<prompt>" --skip-github   Local-only, no GitHub push
 
-    Or use subcommands:
+    \b
+    Files:
+      ~/.flowforge/config.json     Provider, model, port (mode 0600)
+      ~/.flowforge/.env            LLM credentials for langgraph dev
+      ~/.flowforge/langgraph.json  LangGraph server config
+      ~/.flowforge/langgraph-dev.log  Server logs
+      ~/flowforge-workspace/<slug>/   Generated projects
 
-        swe-forge setup    Configure provider and model
+    Run `swe-forge COMMAND --help` for command-specific options.
     """
 
 
-@cli.command()
+@cli.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("prompt")
-@click.option("--repo", help="GitHub repo name (creates private repo if missing)")
-@click.option("--skip-github", is_flag=True, help="Generate files locally only")
-@click.option("--no-studio", is_flag=True, help="Skip LangGraph Studio visualization")
+@click.option(
+    "--repo",
+    metavar="NAME",
+    help="GitHub repo name. Creates a private repo under your account if it "
+         "doesn't exist, otherwise reuses the existing one. "
+         "Defaults to a slug derived from the prompt.",
+)
+@click.option(
+    "--skip-github",
+    is_flag=True,
+    help="Local-only run. Skip repo creation, branch push, and PR opening. "
+         "Artifacts are still committed to a local git repo in the workdir.",
+)
+@click.option(
+    "--no-studio",
+    is_flag=True,
+    help="Skip launching LangGraph Studio in the browser. The langgraph dev "
+         "server still starts (required for graph execution); only the "
+         "Studio URL is suppressed.",
+)
 def run(prompt: str, repo: str | None, skip_github: bool, no_studio: bool) -> None:
     """Generate code from a prompt.
 
+    Runs the full pipeline: clarify → spec → plan → fan-out tasks →
+    code review + security audit + test engineer (parallel) → triage →
+    ship (commit, push, open PR).
+
+    Always creates a feature branch `flowforge/run-<timestamp>` and
+    opens a pull request — even when quality gates flag must-fix
+    issues. Blocked runs still push code; the PR description calls
+    out what needs review.
+
+    \b
     Examples:
+      swe-forge run "Build a REST API with FastAPI"
+      swe-forge run "Build a CLI tool" --repo my-tool
+      swe-forge run "Prototype a parser" --skip-github
+      swe-forge run "Build a web app" --no-studio
 
-        flowforge-ai "Build a REST API with FastAPI"
-
-        flowforge-ai run "Build a CLI tool" --repo my-tool
+    PROMPT is the natural-language description of what to build.
     """
     # Ensure setup has been run
     if not FlowForgeConfig.exists():
@@ -71,9 +123,21 @@ def run(prompt: str, repo: str | None, skip_github: bool, no_studio: bool) -> No
     _run_pipeline(prompt, repo=repo, skip_github=skip_github, no_studio=no_studio)
 
 
-@cli.command()
+@cli.command(context_settings={"help_option_names": ["-h", "--help"]})
 def setup() -> None:
-    """Interactive setup — configure provider, model, and preferences."""
+    """Interactive setup wizard — configure provider, model, and preferences.
+
+    Prompts you to choose:
+
+    \b
+      • LLM provider (GitHub Copilot, OpenAI Codex, or Claude Code)
+      • Model (e.g. gpt-4o-mini, gpt-4o, o1-mini)
+      • Default repo visibility (private / public)
+      • LangGraph Studio port (default 8123)
+
+    Writes config to ~/.flowforge/config.json (mode 0600). Re-run
+    any time to switch provider or model.
+    """
     _do_setup()
 
 

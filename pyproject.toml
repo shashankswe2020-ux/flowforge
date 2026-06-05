@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swe-forge"
-version = "0.1.40"
+version = "0.1.42"
 description = "Multi-agent LangGraph framework for autonomous software development"
 requires-python = ">=3.12"
 license = "MIT"
@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
     "langgraph>=0.4",
     "langgraph-sdk>=0.4",
+    "langgraph-cli[inmem]>=0.1",
     "langchain-core>=0.3",
     "langchain-openai>=0.3",
     "pydantic>=2.7",
@@ -33,7 +34,6 @@ dependencies = [
 
 [project.scripts]
 swe-forge = "flowforge.cli.main:cli"
-flowforge = "flowforge.cli.main:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]

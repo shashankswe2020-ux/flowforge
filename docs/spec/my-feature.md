@@ -12,5 +12,8 @@ REST API spec for user management
 
 ## Assumptions
 
+> These assumptions were surfaced during spec generation.
+> Correct them now if they're wrong.
+
 - Python 3.12+ runtime
 - PostgreSQL 15+ available

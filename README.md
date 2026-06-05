@@ -7,11 +7,11 @@ Multi-agent LangGraph framework for autonomous software development.
 `swe-forge` takes a one-line prompt and runs it through a 10-node graph
 (clarification → spec → plan → fan-out tasks → parallel quality gates
 → issue triage → ship), commits artifacts to a brand-new GitHub repo,
-files issues for every finding, and pushes a tagged release when the
-quality gates pass.
+filed issues for every finding, opens a pull request on a feature
+branch, and pushes a tagged release when the quality gates pass.
 
 > The PyPI distribution is `swe-forge`; the Python module is `flowforge`.
-> `swe-forge` is the primary CLI command — `flowforge` is kept as an alias.
+> Use the `swe-forge` command after installing.
 
 ## Quick start
 
@@ -74,20 +74,21 @@ Config persists at `~/.flowforge/config.json` (mode `0600`). Re-run
 
 ## Demo: `build tic-tac-toe web app`
 
-Real run from `pip install swe-forge` (v0.1.21) using `gpt-4o-mini`
+Real run from `pip install swe-forge` (v0.1.42) using `gpt-4o-mini`
 via GitHub Copilot.
 
 ### Command
 
 ```bash
 swe-forge run "build tic-tac-toe web app" \
-  --repo tic-tac-toe-web --no-studio
+  --repo tic-tac-toe-demo --no-studio
 ```
 
 ### Terminal output
 
 ```
-  ✓ Created GitHub repo tic-tac-toe-web → https://github.com/<you>/tic-tac-toe-web
+  ✓ Created GitHub repo tic-tac-toe-demo → https://github.com/<you>/tic-tac-toe-demo
+  ✓ Created feature branch flowforge/run-20260606-000022
 ======================================================================
 FlowForge — AI-Powered Code Generation Pipeline
 ======================================================================
@@ -95,65 +96,57 @@ FlowForge — AI-Powered Code Generation Pipeline
   Prompt: build tic-tac-toe web app
   Provider: copilot
   Model: gpt-4o-mini
-  Workdir: ~/flowforge-workspace/tic-tac-toe-web
-  Target repo: tic-tac-toe-web
-  Repo URL: https://github.com/<you>/tic-tac-toe-web
-
-🚀 Starting LangGraph server on port 8123...
-   (server logs → ~/.flowforge/langgraph-dev.log)
-  ✓ LangGraph server ready
-
-📊 LangGraph Studio: https://smith.langchain.com/studio/?baseUrl=http://localhost:8123
-   Watch your graph execute live in the browser!
+  Workdir: ~/flowforge-workspace/tic-tac-toe-demo
+  Branch:  flowforge/run-20260606-000022
 
 ━━━ Running Pipeline via LangGraph API ━━━
 
-  Invoking graph... (watch Studio for live visualization)
-
   ━━━ Node: clarification_node ━━━
-     · status=running
-     ⏳ clarification_node running... 4s
      + docs/spec/tic-tac-toe-web-app.md
-     ✓ clarification_node done in 7.8s
+     ✓ clarification_node done in 4.9s
   ━━━ Node: spec_node ━━━
-     · summary: This project involves building a small web application for a tic-tac-toe game…
      · 5 acceptance criteria | stack: HTML5, CSS3, JavaScript >= ES6, React 17+
-     · wrote: docs/spec/tic-tac-toe-web-app.md
-     ⏳ spec_node running... 6s
      + docs/plans/tic-tac-toe-web-app.md
-     ✓ spec_node done in 11.1s
+     ✓ spec_node done in 8.3s
   ━━━ Node: plan_node ━━━
-     · 3 phases: Phase 1: Foundation, Phase 2: Core Features, Phase 3: Polish | 6 tasks | 6 deps
+     · 3 phases | 6 tasks | 6 deps
      ✓ plan_node done in 0.0s
   ━━━ Node: task_fanout_router ━━━
-     ✓ task_fanout_router done in 0.0s
+     + package.json
+     + public/index.html
+     + src/GameBoard.js
+     + src/GameBoard.test.js
+     + src/components/GameControls.js
+     + src/components/GameControls.test.js
+     + src/index.js
+     + src/scoreTracker.js
+     + src/styles/responsive.css
+     + test/scoreTracker.test.js
+     + tests/setup.test.js
+     ✓ task_fanout_router done in 59.2s
   ━━━ Node: task_node ━━━
+     · 6 tasks: succeeded=4, failed=2 | 12 artifacts
      ✓ task_node done in 0.0s
   ━━━ Node: quality_gate_join ━━━
-     ✓ quality_gate_join done in 0.0s
-  ━━━ Node: test_engineer_node ━━━
-     · test: 0 findings
-     ⏳ test_engineer_node running... 10s
      + docs/reviews/code-review-checkpoint-1.md
      + docs/security-audits/security-audit-1.md
-     ✓ test_engineer_node done in 12.7s
-  ━━━ Node: code_review_node ━━━
-     · review: 3 findings (critical=2, high=1)
-     ⏳ code_review_node running... 3s
-     ✓ code_review_node done in 7.4s
+     + docs/test-reports/test-report-1.md
+     ✓ quality_gate_join done in 9.1s
   ━━━ Node: security_audit_node ━━━
-     · security: 4 findings (critical=1, high=1, low=1, medium=1)
-     ✓ security_audit_node done in 0.0s
+     · security: 2 findings (high=1, medium=1)
+  ━━━ Node: test_engineer_node ━━━
+     · test: 3 findings (critical=1, high=1, medium=1)
+  ━━━ Node: code_review_node ━━━
+     · review: 5 findings (critical=2, high=1, medium=2)
   ━━━ Node: quality_gate_merge ━━━
-     ⏳ quality_gate_merge running... 35s
      + docs/triage/triage-report-1.md
-     ✓ quality_gate_merge done in 36.9s
+     ✓ quality_gate_merge done in 25.5s
   ━━━ Node: issue_orchestrator_node ━━━
-     · 7 triaged: can_follow_up=4, must_fix_before_ship=3
-     · shipping_ready=False (0 blockers)
-     ✓ issue_orchestrator_node done in 0.0s
+     · 10 triaged: can_follow_up=8, must_fix_before_ship=2
+     ~ README.md
+     ✓ issue_orchestrator_node done in 9.5s
   ━━━ Node: ship_node ━━━
-     · shipped=False
+     · shipped=False | commit=23f3b926 | push=pushed
      ✓ ship_node done in 0.0s
 
 ======================================================================
@@ -161,74 +154,46 @@ PIPELINE COMPLETE
 ======================================================================
 
 ⚠️  Pipeline ended with status: blocked
-   Local workdir: ~/flowforge-workspace/tic-tac-toe-web
+   Local workdir: ~/flowforge-workspace/tic-tac-toe-demo
+   PR: https://github.com/<you>/tic-tac-toe-demo/pull/17
 ```
 
-End-to-end runtime: **~75s** with `gpt-4o-mini`.
+End-to-end runtime: **~2m** with `gpt-4o-mini`.
 
 ### What was produced
 
-Five commits, all pushed to the new GitHub repo:
+Eight commits on a fresh feature branch, all pushed to the new repo:
 
 ```bash
-$ cd ~/flowforge-workspace/tic-tac-toe-web && git log --oneline
-a464d05 docs: add triage report #1
-a48ffc2 docs: add security audit report #1
-df635eb docs: add code review checkpoint 1
-ebd691a docs: add implementation plan (tic-tac-toe-web-app.md)
-d666fb9 docs: add specification (tic-tac-toe-web-app.md)
-
-$ find docs -type f
-docs/plans/tic-tac-toe-web-app.md
-docs/spec/tic-tac-toe-web-app.md
-docs/security-audits/security-audit-1.md
-docs/triage/triage-report-1.md
-docs/reviews/code-review-checkpoint-1.md
+$ cd ~/flowforge-workspace/tic-tac-toe-demo && git log --oneline
+23f3b92 (HEAD -> flowforge/run-20260606-000022) release: v1.0.0 — update README, CHANGELOG, version
+ec46dbf docs: add triage report #1
+52bee34 docs: add test coverage report #1
+aa10a36 docs: add code review checkpoint 1
+3dc284a docs: add security audit report #1
+35233cb feat: implement 12 task artifact(s)
+76322d9 docs: add implementation plan (tic-tac-toe-web-app.md)
+e93d330 docs: add specification (tic-tac-toe-web-app.md)
+1436664 (origin/main) chore: initial commit
 ```
 
-12 GitHub issues filed automatically — every finding from the
-review / security gates becomes a labelled issue, then the
-orchestrator dedupes and prioritizes them:
+A pull request is opened automatically against `main` with the
+triage summary as the PR body — listing must-fix issues, follow-ups,
+and artifact counts.
 
-```bash
-$ gh issue list --repo <you>/tic-tac-toe-web --limit 12
-12  OPEN  [LOW] Missing Security Headers                       security, priority-low
-11  OPEN  [MEDIUM] Sensitive Data Exposure in API Responses    security, priority-medium
-10  OPEN  [HIGH] Insecure Password Storage                     security, priority-high
- 9  OPEN  [CRITICAL] SQL Injection Vulnerability Detected      security, priority-critical
- 8  OPEN  [CRITICAL] Lack of Input Validation                  security, priority-critical
- 7  OPEN  [LOW] Missing Security Headers                       issue-by-code-review, security
- 6  OPEN  [MEDIUM] Sensitive Data Exposure in API Responses    issue-by-code-review, security
- 5  OPEN  [HIGH] Insecure Password Storage                     issue-by-code-review, security
- 4  OPEN  [HIGH] Potential N+1 Query Pattern                   issue-by-code-review
- 3  OPEN  [CRITICAL] SQL Injection Vulnerability Detected      issue-by-code-review, security
- 2  OPEN  [CRITICAL] Lack of Input Validation                  issue-by-code-review
- 1  OPEN  [CRITICAL] Game State Not Updating Correctly         issue-by-code-review
-```
-
-### Reading the output
-
-| Marker | Meaning |
-| --- | --- |
-| `━━━ Node: X ━━━` | Node started |
-| `· …` | Structured payload summary (spec title, finding counts, etc.) |
-| `+ path/file` | File created in the workdir |
-| `~ path/file` | File modified in the workdir |
-| `⏳ X running… Ns` | Heartbeat printed every 5s for slow nodes |
-| `✓ X done in N.Ns` | Node finished with elapsed time |
+GitHub issues are filed for every finding, then the orchestrator
+dedupes and prioritizes them by severity and source.
 
 ### Pipeline outcomes
 
 | Status | When | Behavior |
 | --- | --- | --- |
-| `succeeded` | All gates clean | `ship_node` writes `CHANGELOG.md` / `README.md`, bumps version, tags, and runs `git push origin HEAD --follow-tags` |
-| `blocked` | One or more `must_fix_before_ship` issues | Artifacts committed and issues filed, but no release tag / push from `ship_node` |
+| `succeeded` | All gates clean | Tagged release pushed, PR opened, ready to merge |
+| `blocked` | One or more `must_fix_before_ship` issues | Code still pushed to feature branch, PR still opened with issues called out as must-fix — quality gates inform the PR review, never silently drop work |
 
-The tic-tac-toe run hit `blocked` because the code review flagged
-2 critical issues (input validation, game-state bug) and security
-flagged 1 critical (SQL injection) — exactly what the gates exist for.
-Re-run `swe-forge run` after addressing the must-fix issues to
-trigger a clean ship.
+Either way you get a feature branch, a pushed commit history, and a
+pull request you can review. The pipeline never blocks delivery of
+generated work — it just annotates it.
 
 ## Architecture
 
@@ -265,7 +230,7 @@ final push happen with `cwd=workdir`, so the source repo of
 git clone https://github.com/shashankswe2020-ux/flowforge && cd flowforge
 pip install -e ".[dev]"
 
-pytest tests/ -q                # full test suite (431 tests)
+pytest tests/ -q                # full test suite (441 tests)
 ruff check flowforge tests      # lint
 mypy flowforge                  # type-check
 python -m build                 # build wheel + sdist

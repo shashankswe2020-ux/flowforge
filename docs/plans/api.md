@@ -2,11 +2,9 @@
 
 ## Task List
 
-### scaffold
+### foundation
 
-### core
-
-### polish
+### core features
 
 ## Dependency Graph
 

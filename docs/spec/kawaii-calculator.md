@@ -2,169 +2,170 @@
 
 ## Summary
 
-Kawaii Calculator is a small, fully client-side single-page web app that performs standard four-function arithmetic (add, subtract, multiply, divide) with clear/delete and decimal support, wrapped in a cohesive, delightful kawaii visual identity (pastel palette, rounded buttons, playful mascot, gentle animations). It is responsive across mobile and desktop, fully keyboard-operable, accessible, and handles edge cases (divide-by-zero, overflow, floating-point rounding) gracefully. It requires no backend, ships as a static site to a host like GitHub Pages or Netlify, and keeps dependencies minimal. Nice-to-have enhancements (sound effects, swappable themes, light/dark mode, calculation history, percentage and sign-toggle, mascot reactions) are explicitly out of the MVP and gated behind prioritization. Success is measured by sub-2s load, correct results across a table-driven test suite, cross-browser parity (Chrome/Edge/Firefox/Safari), keyboard accessibility with zero serious axe violations, and a consistent, charming aesthetic.
+A small, fully client-side single-page web application: a kawaii-themed standard calculator for general consumers who love cute design. It performs the four core arithmetic operations (add, subtract, multiply, divide) plus decimals, clear, and delete, correctly handling edge cases like divide-by-zero and overflow, all wrapped in a polished pastel kawaii aesthetic with rounded buttons, cute typography, and mascot/emoji accents. The UI is responsive and touch-friendly across mobile and desktop, fully keyboard-accessible, and runs entirely in the browser with no backend or external API dependencies, loading interactively in under 2 seconds and working offline after first load. Optional enhancements (press animations, sound effects, percentage/sign-toggle, calculation history, theme switching, scientific functions) are scoped as nice-to-haves behind explicit approval gates.
 
 ## Objective
 
-Build a charming, reliable, no-backend calculator that makes everyday arithmetic feel fun for casual and younger audiences while remaining fast, correct, and accessible. WHY IT MATTERS: most calculators are utilitarian; the differentiator here is a cohesive kawaii experience that delights without sacrificing correctness or speed. WHO IT'S FOR: students, casual consumers, and design-loving users on mobile and desktop. SUCCESS LOOKS LIKE: a static bundle that loads in under 2s, returns correct results for all four operations plus decimals and edge cases, works identically across evergreen browsers, is fully keyboard-operable and screen-reader-labeled, and presents a consistent pastel kawaii theme. USER STORIES: (1) As a casual user, I want to perform basic arithmetic quickly so I can get answers without friction. (2) As a mobile user, I want large, tappable, rounded buttons so I can calculate one-handed. (3) As a desktop/keyboard user, I want to type digits, operators, Enter for equals, Escape to clear, and Backspace to delete so I can work fast. (4) As a design-loving user, I want a cohesive kawaii theme with a cute mascot and gentle animations so the experience feels delightful. (5) As a user who made a mistake, I want clear/delete and friendly, non-crashing error messages so I can recover easily. (6) As an accessibility-reliant user, I want ARIA labels, visible focus, and WCAG AA contrast so I can use every feature.
+Build a delightful, correct, and accessible basic calculator that makes everyday arithmetic feel cute and fun. WHY: existing calculators are utilitarian and joyless; a kawaii calculator differentiates on emotional design while still being a reliable tool. WHO: students, casual users, and fans of cute aesthetics on phones, tablets, and desktops. SUCCESS: arithmetic is always correct, edge cases degrade gracefully with friendly messaging, the app loads in <2s, the theme is visually consistent and polished, and the interface is usable by touch, mouse, and keyboard (including screen readers). User stories: (1) As a casual user, I want to perform add/subtract/multiply/divide quickly so I can handle everyday math. (2) As a kawaii-design fan, I want a cute, cohesive pastel interface so the experience feels delightful. (3) As a mobile user, I want large, well-spaced, touch-friendly buttons so I can tap accurately one-handed. (4) As a keyboard user, I want to type digits, operators, Enter (=), and Escape (clear) so I can calculate without a mouse. (5) As a screen-reader user, I want labeled controls and announced results so I can use the calculator with assistive tech. (6) As any user, when I divide by zero or overflow, I want a friendly, non-crashing message rather than 'Infinity' or 'NaN'.
 
 ## Target Users
 
-General consumers skewing younger — students, casual users, and people who enjoy cute, playful aesthetics. Technical level: non-technical end users with no setup expectations; they open a URL and start tapping or typing. Primary use cases: quick everyday arithmetic on a phone or laptop (totals, splits, simple math), enjoyed for the cute, friendly experience as much as the function. Secondary: keyboard power users on desktop who want fast numeric entry. Accessibility-reliant users (keyboard-only, screen reader, reduced-motion, high-contrast needs) are first-class and must be able to use all core features.
+General consumers and kawaii-aesthetic fans with no technical expertise required — students, casual everyday users, and people who enjoy cute design. They access the app via a modern mobile or desktop browser, primarily for quick, low-stakes arithmetic (tips, splitting bills, homework checks). Not a professional, financial, or scientific audience; precision and scientific notation are secondary concerns. Users expect instant load, obvious tappable controls, and a charming visual experience.
 
 ## Tech Stack
 
-- TypeScript 5.4+ (strict mode enabled)
-- Vite 5.2+ (dev server + static build)
-- Vanilla DOM (no runtime UI framework — chosen to honor 'lightweight/minimal dependencies')
-- CSS3 with custom properties for theming (no CSS framework)
-- Vitest 1.6+ (or 2.x) with @vitest/coverage-v8 (unit + integration)
-- happy-dom 14+ (DOM environment for integration tests)
-- @playwright/test 1.44+ (cross-browser e2e: Chromium, Firefox, WebKit)
-- @axe-core/playwright 4.9+ (automated accessibility checks)
-- ESLint 9+ (flat config) with typescript-eslint 7+
-- Prettier 3.2+ (formatting)
-- @lhci/cli (Lighthouse CI) for performance budget assertions
-- Node.js 20 LTS+ (tooling/CI only; not a runtime dependency of the shipped site)
+- TypeScript 5.4+ (strict mode) — chosen over plain JS for type safety and testability of the calculator engine
+- Vite 5+ — build tool, dev server, and static bundler
+- Vanilla DOM + ES modules (no UI framework) — keeps bundle tiny to meet <2s load
+- CSS3 with custom properties (CSS variables) for design tokens and theme switching; no CSS framework
+- Vitest 1.x + @testing-library/dom + jsdom — unit and DOM-integration tests
+- Playwright 1.4x — end-to-end, responsive-viewport, and offline tests
+- @axe-core/playwright 4.x — automated accessibility checks
+- ESLint 9 (flat config) + @typescript-eslint + Prettier 3 — linting and formatting
+- Node.js 20 LTS — build/CI runtime
+- npm 10+ — package manager (lockfile committed)
 
 ## Commands
 
 ```bash
-build: npm ci && npm run build   # runs: tsc --noEmit && vite build → outputs static site to dist/
-test: npm run test   # runs: vitest run --coverage && playwright test (unit+integration then cross-browser e2e+a11y)
-lint: npm run lint   # runs: eslint . && prettier --check . && tsc --noEmit
-dev: npm run dev   # runs: vite → serves http://localhost:5173 with HMR
+build: npm run build   # runs: tsc --noEmit && vite build  → emits static site to dist/
+test: npm run test   # runs: vitest run --coverage  (unit + DOM integration); e2e via: npm run test:e2e (playwright test)
+lint: npm run lint   # runs: eslint . --max-warnings 0 && prettier --check . && tsc --noEmit
+dev: npm run dev   # runs: vite --open  → http://localhost:5173
 ```
 
 ## Project Structure
 
 ```
-index.html → SPA entry point; mounts root, includes Content-Security-Policy meta and viewport meta
-src/ → Application source (TypeScript)
-src/main.ts → Bootstrap: wires UI to logic, registers keyboard handlers, applies default theme
-src/logic/ → Pure calculator engine: arithmetic, input state machine, number formatting; NO DOM access, fully unit-testable
-src/ui/ → DOM rendering, event handlers, display updates, mascot/animation controllers (all side effects live here)
-src/styles/ → Global CSS, kawaii theme tokens as custom properties (e.g., --kawaii-pink), responsive layout, reduced-motion rules
-src/assets/ → Bundled mascot art, icons, and optional sound files
-public/ → Static files copied verbatim (favicon, manifest.webmanifest, robots.txt)
-tests/ → Vitest unit + integration specs, mirroring src/ structure
-e2e/ → Playwright cross-browser end-to-end and accessibility specs
-docs/spec/ → This specification and design notes
-Config root → vite.config.ts, vitest.config.ts, playwright.config.ts, eslint.config.js, .prettierrc, tsconfig.json, lighthouserc.json
+index.html → SPA entry HTML; mounts #app and loads src/main.ts
+src/ → application source code (TypeScript + CSS)
+src/main.ts → bootstrap: wires engine to UI and registers input handlers
+src/calculator/ → pure calculation engine, no DOM or side effects (highly unit-tested)
+src/calculator/engine.ts → state machine for input sequence, chained ops, equals/repeat
+src/calculator/operations.ts → arithmetic primitives and safe divide-by-zero/overflow handling
+src/calculator/format.ts → display formatting, precision rounding, scientific fallback
+src/ui/ → DOM rendering and event wiring (depends on engine, never the reverse)
+src/ui/keypad.ts → button grid rendering and click/tap handling
+src/ui/display.ts → display render + ARIA live announcements
+src/ui/keyboard.ts → physical keyboard mapping (digits, operators, Enter, Escape, Backspace)
+src/ui/theme.ts → theme/token application and prefers-color-scheme handling
+src/styles/ → CSS: tokens.css (pastel palette, radii, spacing), calculator.css, themes.css, reset.css
+src/assets/ → self-hosted mascot/emoji images, fonts, and optional sound files
+public/ → static files copied verbatim (favicon, manifest if approved)
+tests/unit/ → Vitest specs mirroring src/ structure
+tests/e2e/ → Playwright specs (flows, responsive, a11y, offline)
+docs/spec/ → this specification and related design notes
+vite.config.ts, tsconfig.json, eslint.config.js, .prettierrc, package.json → tooling config at root
 ```
 
 ## Code Style
 
-- Files: kebab-case.ts (e.g., calculator-engine.ts, display-formatter.ts)
-- Types/Interfaces/Classes: PascalCase (no 'I' prefix on interfaces)
+- Files: kebab-case.ts and kebab-case.css
+- Types/interfaces/classes: PascalCase (e.g., CalculatorState)
 - Functions/variables: camelCase
-- Constants and enum members: UPPER_SNAKE_CASE
-- CSS classes: BEM-style kebab-case (e.g., .calc-button--operator); theme values exposed as CSS custom properties
-- Named exports only — no default exports
-- TypeScript strict mode; explicit return types on all exported functions; no implicit any, no '@ts-ignore' without an inline justification comment
-- Calculator math lives in pure, side-effect-free functions in src/logic; all DOM/audio/storage side effects isolated in src/ui
-- Formatting enforced by Prettier: 2-space indent, single quotes, semicolons, trailing commas
-- ESLint no-restricted-syntax rule bans eval and new Function; lint must pass with zero warnings
-- Accessibility-first markup: every interactive control has an aria-label; decorative emoji/mascot marked aria-hidden="true"
-- Commits follow Conventional Commits (feat:, fix:, chore:, test:, docs:)
+- Module-level constants: UPPER_SNAKE_CASE
+- CSS custom properties: --kc-* prefix in kebab-case (e.g., --kc-color-pastel-pink)
+- Named exports only; no default exports
+- Strict TypeScript: explicit return types on exported functions; no `any`, no non-null `!` assertions
+- Calculator engine functions are pure (input → output), deterministic, and DOM-free
+- UI modules own all DOM access; render with textContent / createElement, never innerHTML for dynamic values
+- Prettier formatting: 2-space indent, single quotes, semicolons, 100-char print width, trailing commas
+- CSS class naming: BEM-ish (block__element--modifier) or data-* hooks for JS; no inline styles for theming
+- All interactive elements are real <button> elements with type and aria-label
 
 ## Acceptance Criteria
 
-1. VERIFY THAT the production build served from dist/ scores Time-to-Interactive < 2s and total transferred JS+CSS <= 150KB gzipped under Lighthouse CI on a simulated mid-tier mobile / 4G profile (npm run test runs @lhci/cli assertions).
-2. VERIFY THAT the src/logic unit suite covers add, subtract, multiply, divide, decimal entry, chained operations, and sign-toggle with table-driven cases and passes at 100% line+branch coverage for src/logic (vitest run --coverage).
-3. GIVEN any number divided by 0 WHEN '=' is pressed THEN the display shows a friendly, non-crashing message (e.g., "Oops! Can't divide by zero") and the app remains fully usable for the next calculation (covered by unit + e2e specs).
-4. GIVEN a result exceeding Number.MAX_SAFE_INTEGER or the display width WHEN computed THEN the value is shown in a bounded, rounded/scientific format and never renders raw 'NaN' or 'Infinity' or overflows the display container.
-5. GIVEN floating-point operations such as 0.1 + 0.2 WHEN evaluated THEN the displayed result is '0.3' (rounded to <= 12 significant figures) — asserted by unit test.
-6. GIVEN a keyboard-only user WHEN they press digits, +, -, *, /, '.', Enter (=), Escape (clear), and Backspace (delete) THEN every calculator action is reachable, the result is correct, and the focused control shows a visible focus indicator (Playwright keyboard e2e).
-7. VERIFY THAT @axe-core/playwright reports zero serious or critical accessibility violations on the main view and that interactive controls meet WCAG AA contrast despite the pastel palette (npm run test).
-8. GIVEN the Playwright suite WHEN run against Chromium, Firefox, and WebKit THEN all e2e tests pass, demonstrating parity for Chrome/Edge (Chromium), Firefox, and Safari (WebKit).
-9. GIVEN viewport widths from 320px to 1920px WHEN the app renders THEN all controls are visible with touch targets >= 44x44px and no horizontal scrolling appears (Playwright responsive assertions).
-10. VERIFY THAT no eval, Function constructor, or string-based code execution is used to compute results (ESLint no-restricted-syntax rule passes in npm run lint).
-11. GIVEN a user with prefers-reduced-motion enabled WHEN animations would play THEN motion is reduced or disabled per the media query (asserted via CSS/e2e check).
+1. GIVEN two operands and any of + - × ÷ WHEN equals is triggered THEN the displayed result equals the mathematically correct value (verified by Vitest engine tests covering positive, negative, decimal, and large-number cases)
+2. GIVEN any number divided by zero WHEN equals is triggered THEN the display shows a friendly non-crashing message (e.g., 'Oops! Can't divide by zero 🥺') and the engine returns an explicit error state — never 'Infinity', 'NaN', or a thrown exception (Vitest unit test + Playwright e2e)
+3. GIVEN chained operations like 2 + 3 × 4 = WHEN evaluated THEN the result matches the documented left-to-right pocket-calculator semantics (see open question) and is asserted in Vitest
+4. GIVEN decimal arithmetic such as 0.1 + 0.2 WHEN evaluated THEN the displayed result is '0.3' after precision rounding (no 0.30000000000000004) — verified by Vitest format/engine tests
+5. VERIFY THAT the production build (npm run build) is interactive in < 2s on a simulated Fast 3G/mid-tier CPU profile, asserted via a Playwright performance measurement (Time-to-Interactive / first-input readiness) in tests/e2e
+6. VERIFY THAT @axe-core/playwright reports zero 'critical' or 'serious' accessibility violations on the calculator page
+7. GIVEN a viewport width of 320px and of 1440px WHEN the app renders THEN all buttons are visible, non-overlapping, and have a touch target ≥ 44×44 CSS px (Playwright viewport assertions)
+8. GIVEN keyboard-only operation WHEN the user types digits, an operator, Enter, Escape, and Backspace THEN the display updates correctly for each, matching equivalent button clicks (Playwright e2e)
+9. VERIFY THAT statement+branch coverage of src/calculator/** is ≥ 90% and overall project coverage is ≥ 80% (vitest --coverage gate fails the build below threshold)
+10. VERIFY THAT after first load, the app functions with the network disabled and makes zero runtime network requests (Playwright offline/route-abort test)
+11. VERIFY THAT npm run lint exits 0 (eslint --max-warnings 0, prettier --check, tsc --noEmit all pass)
 
 ## Assumptions
 
 > These assumptions were surfaced during spec generation.
 > Correct them now if they're wrong.
 
-- Tech stack was not specified; assuming TypeScript + Vite + vanilla DOM (no UI framework) and hand-written CSS to satisfy the 'lightweight/minimal dependencies' constraint.
-- Calculator uses immediate-execution (left-to-right) semantics like a standard pocket calculator, NOT operator precedence/PEMDAS — this changes results (e.g., 2 + 3 * 4 = 20, not 14) and needs confirmation.
-- Floating-point precision is handled in-app by rounding to ~12 significant figures; no big-decimal library is added unless approved.
-- MVP scope = four-function arithmetic + decimal + clear/delete + cohesive kawaii theme + responsive layout + keyboard support; all listed nice-to-haves (sound, multiple themes, dark mode, history, percentage, mascot reactions) are deferred until prioritized.
-- localStorage, if used, holds only non-sensitive preferences (theme) and optional history; no personal data or accounts.
-- Mascot/character artwork and any sound assets will be provided by design or sourced license-cleared; lightweight placeholders are used until assets arrive.
-- Deployment is a static host (GitHub Pages/Netlify) serving over HTTPS; no server-side rendering or runtime backend.
-- Only modern evergreen browsers are targeted; no IE/legacy polyfills.
-- MVP copy is English only, but display/error strings are centralized to allow future i18n.
-- Node.js 20+ is available in development and CI for tooling.
-- A bundle-size performance budget of <= 150KB gzipped (JS+CSS) is acceptable as a proxy for the sub-2s load goal.
+- TypeScript is used instead of plain JavaScript for engine testability and type safety; the constraint 'vanilla JS or lightweight framework' is interpreted as permitting TS that compiles to vanilla JS with no runtime framework
+- No UI framework is used (vanilla DOM) to keep the bundle minimal and reliably meet the <2s load target
+- The calculator uses simple left-to-right evaluation (basic pocket-calculator behavior), NOT operator precedence (PEMDAS) — flagged as an open question
+- Floating-point results are rounded to ~12 significant digits and fall back to scientific notation only beyond a display-width threshold to avoid NaN/precision artifacts
+- Calculation history (nice-to-have) and theme choice, if implemented, persist only in localStorage; no other data is stored and nothing leaves the device
+- UI is English-only; no internationalization in scope
+- 'Modern evergreen browsers' means the latest two stable versions of Chrome, Firefox, Safari, and Edge
+- Mascot/emoji accents use system emoji or self-hosted, license-cleared assets — no external CDN or third-party API
+- Sound effects (nice-to-have) default OFF and respect prefers-reduced-motion; no audio plays without user opt-in
+- Hosting is a static file host (e.g., GitHub Pages/Netlify) over HTTPS; the deliverable is the contents of dist/
 
 ## Security Considerations
 
-- No backend, accounts, or PII are involved; nonetheless apply defense-in-depth on the client.
-- NEVER evaluate expressions with eval() or new Function(); implement a deterministic input state machine/parser to eliminate code-injection risk (also enforced by ESLint).
-- Whitelist keyboard and button input; ignore non-calculator keys and clamp numeric ranges to prevent invalid-state crashes.
-- Render all display output via textContent — never innerHTML/outerHTML/insertAdjacentHTML with dynamic values — to prevent XSS.
-- Set a strict Content-Security-Policy via host headers and an index.html meta tag (default-src 'self'; object-src 'none'; base-uri 'self'; avoid inline script).
-- Serve only over HTTPS (enforced by the static host) and enable HSTS where the host supports it.
-- Prefer self-hosted/bundled assets; if any third-party/CDN asset is unavoidable, require Subresource Integrity (SRI) hashes.
-- Treat localStorage as untrusted on read: namespace keys, validate/parse defensively with try/catch and a schema/shape check, and fall back to defaults on corruption; store only non-sensitive data.
-- Supply-chain hygiene: pin/lock dependencies, keep the dependency count minimal, run npm audit and enable Dependabot in CI.
-- No secrets, API keys, or tokens should exist in the codebase; reject any PR that introduces them.
-- No third-party trackers or analytics by default to preserve user privacy.
+- Arithmetic is computed with explicit operation functions only — never eval() or new Function() — to eliminate code-injection risk from user input
+- All dynamic display values are written via textContent / DOM node APIs; innerHTML is never used with computed or stored values to prevent XSS
+- Input is validated/constrained at the engine boundary: only digits, a single decimal point, and known operators are accepted; malformed sequences are rejected gracefully
+- A Content-Security-Policy (meta tag and/or host header) restricts script/style/img/font/connect sources to 'self'; no inline event handlers
+- No secrets, API keys, tokens, or credentials exist in the codebase or build output (nothing to leak; there is no backend)
+- localStorage (if used for theme/history) stores only non-sensitive data and is defensively parsed (try/catch, schema/shape validation) on read to tolerate tampering or corruption
+- Any third-party asset is self-hosted; if a CDN is ever introduced it must use Subresource Integrity (SRI) — but the default is zero external requests at runtime
+- The app is served exclusively over HTTPS
+- Dependencies are pinned via committed lockfile; `npm audit --audit-level=high` runs in CI and Dependabot/Renovate monitors updates
 
 ## Testing Strategy
 
-- Frameworks: Vitest (unit + integration) with @vitest/coverage-v8, Playwright (@playwright/test) for cross-browser e2e, and @axe-core/playwright for automated accessibility scans.
-- Unit (largest layer): pure calculator engine in src/logic — table-driven tests for all four operations, decimals, chained operations, sign-toggle, divide-by-zero, overflow/bounding, and float rounding (e.g., 0.1+0.2=0.3). Coverage target: 100% lines+branches for src/logic; >= 90% overall.
-- Integration: DOM event handling in happy-dom — verify button clicks and keydown events map to correct engine calls and display updates; mock localStorage and the Web Audio API; use vi.useFakeTimers() for animation/debounce timing.
-- End-to-end: Playwright against Chromium, Firefox, and WebKit — full user flows, keyboard-only navigation (digits/operators/Enter/Escape/Backspace), responsive viewports (320px–1920px), divide-by-zero friendly message, and theme switching if in scope.
-- Accessibility: axe-core scan must report zero serious/critical issues; assert visible focus, ARIA labels on all controls, WCAG AA contrast, and prefers-reduced-motion handling.
-- Performance: Lighthouse CI (@lhci/cli) asserts Time-to-Interactive < 2s and the <= 150KB gzipped bundle budget on a mid-tier mobile profile.
-- Mocking approach: stub Web Audio (sound), localStorage, and timers; no network layer exists, so there are no external services to mock.
-- Test locations: unit/integration specs in tests/ mirroring src/ structure; e2e/a11y specs in e2e/. CI runs lint + all test levels on every PR with the coverage gate enforced as a merge blocker.
+- Framework: Vitest (+ jsdom + @testing-library/dom) for unit/integration; Playwright (+ @axe-core/playwright) for e2e/a11y
+- Hierarchy — Unit (largest layer): exhaustively test src/calculator/** pure functions: each operation, chained operations, repeated equals, decimal precision, divide-by-zero, overflow, clear/delete, leading-zero and multi-decimal guards
+- Hierarchy — Integration: test src/ui/** wiring with @testing-library/dom — button clicks and keyboard events drive engine state and update the display/ARIA live region correctly
+- Hierarchy — E2E: full user flows in real browsers, responsive checks at 320px and 1440px, keyboard-only operation, offline-after-load, and a load-performance assertion (<2s interactive)
+- Accessibility: automated axe scans gate on zero critical/serious violations; manual screen-reader smoke check documented in test notes
+- Coverage targets: ≥90% statements+branches for src/calculator/**, ≥80% overall; CI fails below threshold
+- Mocking: mock the Web Audio API and localStorage in unit tests; use Vitest fake timers for animation/debounce logic; Playwright aborts/disables network for the offline test — no external services to mock since there are none
+- Test layout: tests/unit/ mirrors src/ structure; tests/e2e/ holds Playwright specs; tests run in CI on every push/PR before merge
 
 ## Boundaries
 
 ### Always
 
-- ✅ Implement all arithmetic as pure, side-effect-free functions in src/logic with full unit coverage.
-- ✅ Run `npm run lint` and `npm run test` (unit + integration + e2e + a11y) before every commit/PR and keep them green.
-- ✅ Use TypeScript strict mode with explicit types on exported functions and zero implicit any.
-- ✅ Validate/whitelist all keyboard and button input, and explicitly handle divide-by-zero, overflow, and float rounding.
-- ✅ Write display output via textContent and use semantic HTML with ARIA labels/roles for every control.
-- ✅ Respect prefers-reduced-motion, maintain >= 44px touch targets, and meet WCAG AA contrast even within the pastel palette.
-- ✅ Keep the shipped bundle within the performance budget (<= 150KB gzipped JS+CSS).
-- ✅ Provide a keyboard equivalent for every interactive control.
+- ✅ Run `npm run lint` and `npm run test` (and pass) before every commit/PR merge
+- ✅ Keep src/calculator/** pure: no DOM access, no side effects, deterministic outputs, fully unit-tested
+- ✅ Write computed/stored values to the DOM via textContent or element APIs — never innerHTML
+- ✅ Maintain ≥90% coverage on the calculator engine and ≥80% overall
+- ✅ Drive every color, radius, spacing, and font through CSS custom-property design tokens
+- ✅ Respect prefers-reduced-motion (disable animations/sound) and prefers-color-scheme (default theme)
+- ✅ Give every control a real <button> with an explicit type and aria-label, and announce results via an aria-live region
+- ✅ Self-host all fonts, images, and sounds; keep runtime network requests at zero
 
 ### Ask First
 
-- ⚠️ Adding any runtime dependency (e.g., decimal.js, a UI framework, an animation or sound library).
-- ⚠️ Introducing a UI framework or changing the build tool (Vite → other).
-- ⚠️ Changing calculator semantics (immediate-execution <-> operator precedence).
-- ⚠️ Adding persistence beyond theme/history, or any data leaving the device.
-- ⚠️ Adding analytics/telemetry or any third-party/CDN-hosted asset.
-- ⚠️ Raising the bundle-size or load-time performance budget.
-- ⚠️ Changing CI/CD, hosting, or Content-Security-Policy configuration.
+- ⚠️ Adding any runtime dependency or introducing a UI framework
+- ⚠️ Adding a service worker / PWA manifest or any caching layer
+- ⚠️ Persisting anything to localStorage (theme, history) or other client storage
+- ⚠️ Changing evaluation semantics (e.g., switching from left-to-right to PEMDAS)
+- ⚠️ Enabling sound effects on by default or adding autoplaying audio
+- ⚠️ Changing build, CI, lint, or coverage-threshold configuration
+- ⚠️ Adding scientific functions or other features beyond the confirmed must-have set
 
 ### Never
 
-- 🚫 Use eval(), new Function(), or any string-based code execution to compute results.
-- 🚫 Inject dynamic or user-derived strings via innerHTML/outerHTML/insertAdjacentHTML.
-- 🚫 Commit secrets, API keys, or tokens (none should exist in this project).
-- 🚫 Store sensitive or personal data in localStorage.
-- 🚫 Ship with failing or skipped tests, or remove failing tests without explicit approval.
-- 🚫 Use the `any` type or silence type errors with `@ts-ignore` without a justified inline comment.
-- 🚫 Add user accounts, backend calls, or third-party trackers.
-- 🚫 Block or gate core arithmetic behind optional/nice-to-have features.
+- 🚫 Use eval(), new Function(), or any dynamic code execution for arithmetic
+- 🚫 Use innerHTML (or equivalent) with user-entered or computed values
+- 🚫 Add a backend, server, or any external/third-party API or network call at runtime
+- 🚫 Commit secrets, API keys, tokens, or credentials
+- 🚫 Use the `any` type, `@ts-ignore`, or otherwise disable TypeScript strictness without approval
+- 🚫 Remove, skip, or weaken failing tests (including accessibility checks) to make CI pass without approval
+- 🚫 Ship a build with critical/serious axe violations or with lint/type errors
 
 ## Open Questions
 
-- [ ] Confirm calculator semantics: immediate-execution (standard pocket calculator) vs. operator precedence (PEMDAS)?
-- [ ] Which nice-to-haves, if any, are in scope for v1 — sound effects, specific themes, light/dark mode, history, percentage/sign-toggle, mascot reactions?
-- [ ] If history is included, should it persist across sessions via localStorage or be session-only?
-- [ ] Who supplies the mascot/character art and sounds, and what are the licensing terms? Is there a specific character to match?
-- [ ] Preferred number formatting: thousands separators? At what magnitude should it switch to scientific notation, and what max digit count?
-- [ ] Are there target Lighthouse thresholds beyond load time (e.g., Accessibility >= 95, Performance >= 90)?
-- [ ] Is any analytics/telemetry desired, or should the app remain zero-tracking by default (privacy-preserving)?
-- [ ] Should gentle animations always respect prefers-reduced-motion (assumed yes) — confirm intensity/defaults?
+- [ ] Evaluation semantics: simple left-to-right (assumed) or full operator precedence (PEMDAS)? This changes engine design and test expectations.
+- [ ] Maximum displayable digits and the exact overflow threshold before switching to scientific notation or an 'overflow' message?
+- [ ] Should calculation history persist across sessions (localStorage) or be session-only? Is history a confirmed must-have or nice-to-have for v1?
+- [ ] Branding: custom-illustrated mascot vs. emoji-only? If custom art, who provides assets and what is the license?
+- [ ] Are sound effects in v1 scope, and what is the default state (off assumed)?
+- [ ] Minimum supported mobile width — 320px (assumed) or 360px?
+- [ ] Is PWA/installability + a service worker for offline desired, or is 'works offline once loaded' satisfied by static caching alone?
+- [ ] Which themes ship in v1 (light/dark only, or a selectable palette set), and is theme switching must-have or nice-to-have?

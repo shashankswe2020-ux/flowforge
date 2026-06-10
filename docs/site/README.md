@@ -22,8 +22,14 @@ Or just open `docs/site/index.html` directly in a browser.
 
 ## Deploy on GitHub Pages
 
-In **Settings → Pages**, set the source to the `main` branch and the
-`/docs` folder, then point Pages at `docs/site/index.html` (or move the
-files to `/docs` directly if you prefer the default layout).
+GitHub Pages serves `index.html` at the root of the folder you select, so
+choose **one** of these options:
+
+- **Option A (recommended): use a custom GitHub Action** (e.g.
+  `actions/upload-pages-artifact`) to publish only `docs/site/` as the
+  Pages artifact. The site will be served at the repository's Pages URL.
+- **Option B: move the files.** Copy the contents of `docs/site/` into
+  `/docs` (so `docs/index.html` exists) and in **Settings → Pages** set
+  the source to the `main` branch with the `/docs` folder.
 
 No build step. No dependencies. Pure HTML/CSS/JS.

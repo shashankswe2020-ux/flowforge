@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>swe-forge — Autonomous multi-agent software development</title>
+    <meta
+      name="description"
+      content="swe-forge takes a one-line prompt and runs it through a 10-node LangGraph pipeline — clarify, spec, plan, build, review, ship — to a real GitHub repo with PRs, issues, and tagged releases."
+    />
+    <meta property="og:title" content="swe-forge — Autonomous multi-agent software development" />
+    <meta
+      property="og:description"
+      content="One prompt in. A shipped repo out. swe-forge runs a 10-node LangGraph pipeline that clarifies, specs, plans, builds, reviews, and releases your project on GitHub."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow" aria-hidden="true"></div>
+
+    <header class="nav">
+      <a class="nav__brand" href="#top" aria-label="swe-forge home">
+        <span class="nav__logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="lg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#9b8cff" />
+                <stop offset="1" stop-color="#5ad1ff" />
+              </linearGradient>
+            </defs>
+            <path
+              d="M6 6h10a8 8 0 0 1 0 16h-4v4H6V6Zm6 6v6h4a2.999 2.999 0 1 0 0-6h-4Z"
+              fill="url(#lg)"
+            />
+          </svg>
+        </span>
+        <span class="nav__name">swe-forge</span>
+        <span class="nav__tag">by FlowForge</span>
+      </a>
+      <nav class="nav__links" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#quickstart">Quick start</a>
+        <a href="#pipeline">Pipeline</a>
+        <a
+          class="nav__cta"
+          href="https://github.com/shashankswe2020-ux/flowforge"
+          target="_blank"
+          rel="noreferrer noopener"
+          >GitHub →</a
+        >
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero__inner">
+          <a
+            class="badge"
+            href="https://pypi.org/project/swe-forge/"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <span class="badge__dot"></span>
+            <span>v0.1 on PyPI · <code>pip install swe-forge</code></span>
+          </a>
+          <h1 class="hero__title">
+            One prompt in.
+            <span class="hero__title--grad">A shipped repo out.</span>
+          </h1>
+          <p class="hero__sub">
+            <strong>swe-forge</strong> is a multi-agent LangGraph framework for autonomous software
+            development. It runs your idea through a 10-node pipeline — clarification, spec, plan,
+            parallel build, quality gates, triage, ship — and commits the artifacts to a brand-new
+            GitHub repo with issues filed, a pull request opened, and a tagged release pushed.
+          </p>
+          <div class="hero__cta">
+            <a class="btn btn--primary" href="#quickstart">Get started</a>
+            <a
+              class="btn btn--ghost"
+              href="https://github.com/shashankswe2020-ux/flowforge"
+              target="_blank"
+              rel="noreferrer noopener"
+              >View on GitHub</a
+            >
+          </div>
+          <ul class="hero__meta">
+            <li><span>10-node</span>LangGraph pipeline</li>
+            <li><span>Multi-provider</span>Copilot · OpenAI · Claude</li>
+            <li><span>Real GitHub</span>repo, issues, PRs, releases</li>
+          </ul>
+        </div>
+
+        <div class="hero__terminal" aria-hidden="true">
+          <div class="term">
+            <div class="term__bar">
+              <span class="term__dot term__dot--r"></span>
+              <span class="term__dot term__dot--y"></span>
+              <span class="term__dot term__dot--g"></span>
+              <span class="term__title">~/projects — swe-forge</span>
+            </div>
+            <pre class="term__body"><span class="t-dim">$</span> <span class="t-cmd">swe-forge</span> run <span class="t-str">"build tic-tac-toe web app"</span>
+
+<span class="t-ok">✓</span> <span class="t-key">clarify</span>     interpreted prompt &amp; gathered constraints
+<span class="t-ok">✓</span> <span class="t-key">spec</span>        wrote <span class="t-path">docs/specs/tic-tac-toe.md</span>
+<span class="t-ok">✓</span> <span class="t-key">plan</span>        broke spec into 7 verifiable tasks
+<span class="t-ok">✓</span> <span class="t-key">fan-out</span>     8 builder agents running in parallel
+<span class="t-ok">✓</span> <span class="t-key">tests</span>       42 passing · coverage 87%
+<span class="t-ok">✓</span> <span class="t-key">review</span>      5-axis code review · 0 blocking
+<span class="t-ok">✓</span> <span class="t-key">triage</span>      3 issues filed
+<span class="t-ok">✓</span> <span class="t-key">ship</span>        PR <span class="t-link">#1</span> opened · tag <span class="t-link">v0.1.0</span> pushed
+
+<span class="t-dim">→</span> <span class="t-link">https://github.com/you/tic-tac-toe</span><span class="t-caret">▍</span></pre>
+          </div>
+        </div>
+      </section>
+
+      <section class="logos" aria-label="Powered by">
+        <span class="logos__label">Plays nicely with</span>
+        <ul>
+          <li>LangGraph</li>
+          <li>GitHub Copilot</li>
+          <li>OpenAI</li>
+          <li>Anthropic Claude</li>
+          <li>gh CLI</li>
+          <li>PyPI</li>
+        </ul>
+      </section>
+
+      <section id="features" class="section">
+        <header class="section__head">
+          <p class="eyebrow">Features</p>
+          <h2>Everything an autonomous engineer needs.</h2>
+          <p class="section__lede">
+            swe-forge is not a one-shot code generator. It is a graph of specialized agents that
+            plan, build, review, and ship — with the receipts to prove it.
+          </p>
+        </header>
+
+        <div class="grid grid--3">
+          <article class="card">
+            <div class="card__icon">🧭</div>
+            <h3>Clarify before code</h3>
+            <p>
+              A clarification node turns a fuzzy prompt into a concrete brief — scope, constraints,
+              acceptance criteria — before a single file is written.
+            </p>
+          </article>
+          <article class="card">
+            <div class="card__icon">📐</div>
+            <h3>Spec-driven by default</h3>
+            <p>
+              Every run produces a markdown spec in <code>docs/specs/</code> that the downstream
+              agents must satisfy. No spec, no code.
+            </p>
+          </article>
+          <article class="card">
+            <div class="card__icon">🧩</div>
+            <h3>Parallel builders</h3>
+            <p>
+              The planner fans out independent tasks to builder agents that work concurrently, each
+              with its own slice of the spec and its own tests.
+            </p>
+          </article>
+          <article class="card">
+            <div class="card__icon">🛡️</div>
+            <h3>5-axis review gate</h3>
+            <p>
+              Correctness, readability, architecture, security, performance. A reviewer agent
+              blocks the ship until the bar is met.
+            </p>
+          </article>
+          <article class="card">
+            <div class="card__icon">🐛</div>
+            <h3>Issues that triage themselves</h3>
+            <p>
+              Findings from review and security audits are filed as real GitHub issues, labelled
+              and linked to the offending lines.
+            </p>
+          </article>
+          <article class="card">
+            <div class="card__icon">🚀</div>
+            <h3>Ships a tagged release</h3>
+            <p>
+              On green, swe-forge opens a PR on a feature branch and pushes a semver tag. You
+              review the diff, not a chat transcript.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="how" class="section">
+        <header class="section__head">
+          <p class="eyebrow">How it works</p>
+          <h2>From one line to a release in four moves.</h2>
+        </header>
+
+        <ol class="steps">
+          <li class="step">
+            <div class="step__num">01</div>
+            <h3>You write one line</h3>
+            <p>
+              <code>swe-forge run "build tic-tac-toe web app"</code> — that is the entire
+              specification you need to provide. The clarification agent fills in the rest by
+              asking targeted questions when needed.
+            </p>
+          </li>
+          <li class="step">
+            <div class="step__num">02</div>
+            <h3>The graph plans the work</h3>
+            <p>
+              The spec node writes a markdown specification. The planner breaks it into discrete,
+              dependency-ordered tasks and fans them out to parallel builder agents.
+            </p>
+          </li>
+          <li class="step">
+            <div class="step__num">03</div>
+            <h3>Quality gates run in parallel</h3>
+            <p>
+              Tests, lint, type-check, code review, and security audit all run as graph nodes.
+              Failures route back to a triage agent that files issues and dispatches fix-up work.
+            </p>
+          </li>
+          <li class="step">
+            <div class="step__num">04</div>
+            <h3>It ships to GitHub</h3>
+            <p>
+              A new repo is created via <code>gh</code>, the feature branch is pushed, a pull
+              request is opened, and on green a tagged release lands on <code>main</code>.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="pipeline" class="section">
+        <header class="section__head">
+          <p class="eyebrow">The pipeline</p>
+          <h2>Ten nodes. One graph. Zero hand-holding.</h2>
+          <p class="section__lede">
+            Each node is a focused agent with a contract — a typed input, a typed output, and a
+            quality bar it must clear before the graph advances.
+          </p>
+        </header>
+
+        <div class="pipeline">
+          <div class="node">clarify</div>
+          <div class="arrow">→</div>
+          <div class="node">spec</div>
+          <div class="arrow">→</div>
+          <div class="node">plan</div>
+          <div class="arrow">→</div>
+          <div class="node node--fan">fan-out · build</div>
+          <div class="arrow">→</div>
+          <div class="node">test</div>
+          <div class="arrow">→</div>
+          <div class="node">review</div>
+          <div class="arrow">→</div>
+          <div class="node">security</div>
+          <div class="arrow">→</div>
+          <div class="node">triage</div>
+          <div class="arrow">→</div>
+          <div class="node node--ship">ship</div>
+        </div>
+      </section>
+
+      <section id="quickstart" class="section">
+        <header class="section__head">
+          <p class="eyebrow">Quick start</p>
+          <h2>Three commands. That is the whole tutorial.</h2>
+        </header>
+
+        <div class="quickstart">
+          <div class="quickstart__copy">
+            <ol class="qs-list">
+              <li>
+                <strong>Install</strong>
+                <p>
+                  Grab the package from PyPI. The distribution is <code>swe-forge</code>; the
+                  Python module is <code>flowforge</code>.
+                </p>
+              </li>
+              <li>
+                <strong>Configure</strong>
+                <p>
+                  Pick a provider — GitHub Copilot, OpenAI, or Claude — in a one-time interactive
+                  setup. Credentials stay on your machine.
+                </p>
+              </li>
+              <li>
+                <strong>Run</strong>
+                <p>
+                  Hand it a prompt. swe-forge creates a new private GitHub repo, runs the pipeline,
+                  and pushes the result.
+                </p>
+              </li>
+            </ol>
+          </div>
+
+          <div class="code">
+            <div class="code__bar">
+              <span>bash</span>
+              <button class="code__copy" type="button" data-copy>Copy</button>
+            </div>
+            <pre><code id="snippet"># 1. install from PyPI
+pip install swe-forge
+
+# 2. configure provider/model (one-time, interactive)
+swe-forge setup
+
+# 3. run a prompt — auto-creates a private GitHub repo
+swe-forge run "build tic-tac-toe web app"
+
+# common flags
+swe-forge run "&lt;prompt&gt;" --repo my-name      # use/create a specific repo
+swe-forge run "&lt;prompt&gt;" --skip-github       # local-only, no remote
+swe-forge run "&lt;prompt&gt;" --no-studio         # skip LangGraph Studio</code></pre>
+          </div>
+        </div>
+
+        <p class="fineprint">
+          Requires Python ≥ 3.12 and the <code>gh</code> CLI authenticated. Generated projects land
+          in <code>~/flowforge-workspace/&lt;slug&gt;/</code> and are pushed to
+          <code>https://github.com/&lt;you&gt;/&lt;slug&gt;</code>. The swe-forge source repo is
+          never written to.
+        </p>
+      </section>
+
+      <section class="cta">
+        <div class="cta__inner">
+          <h2>Stop prompting. Start shipping.</h2>
+          <p>
+            swe-forge turns a sentence into a repository — with a spec, a plan, tests, a review,
+            issues, a PR, and a tag. Try it on your next side-project tonight.
+          </p>
+          <div class="cta__actions">
+            <a class="btn btn--primary" href="#quickstart">Install swe-forge</a>
+            <a
+              class="btn btn--ghost"
+              href="https://github.com/shashankswe2020-ux/flowforge"
+              target="_blank"
+              rel="noreferrer noopener"
+              >Star on GitHub</a
+            >
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer__inner">
+        <div class="footer__brand">
+          <span class="nav__logo" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient
+                  id="lg-footer"
+                  x1="0"
+                  y1="0"
+                  x2="32"
+                  y2="32"
+                  gradientUnits="userSpaceOnUse"
+                >
+                  <stop stop-color="#9b8cff" />
+                  <stop offset="1" stop-color="#5ad1ff" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M6 6h10a8 8 0 0 1 0 16h-4v4H6V6Zm6 6v6h4a2.999 2.999 0 1 0 0-6h-4Z"
+                fill="url(#lg-footer)"
+              />
+            </svg>
+          </span>
+          <div>
+            <strong>swe-forge</strong>
+            <p>Multi-agent LangGraph framework for autonomous software development.</p>
+          </div>
+        </div>
+        <div class="footer__cols">
+          <div>
+            <h4>Project</h4>
+            <a href="https://github.com/shashankswe2020-ux/flowforge" target="_blank" rel="noreferrer noopener">GitHub</a>
+            <a href="https://pypi.org/project/swe-forge/" target="_blank" rel="noreferrer noopener">PyPI</a>
+            <a href="https://github.com/shashankswe2020-ux/flowforge/blob/main/CHANGELOG.md" target="_blank" rel="noreferrer noopener">Changelog</a>
+          </div>
+          <div>
+            <h4>Docs</h4>
+            <a href="https://github.com/shashankswe2020-ux/flowforge#readme" target="_blank" rel="noreferrer noopener">README</a>
+            <a href="https://github.com/shashankswe2020-ux/flowforge/tree/main/docs/specs" target="_blank" rel="noreferrer noopener">Specs</a>
+            <a href="https://github.com/shashankswe2020-ux/flowforge/tree/main/docs/reviews" target="_blank" rel="noreferrer noopener">Reviews</a>
+          </div>
+          <div>
+            <h4>Community</h4>
+            <a href="https://github.com/shashankswe2020-ux/flowforge/issues" target="_blank" rel="noreferrer noopener">Issues</a>
+            <a href="https://github.com/shashankswe2020-ux/flowforge/pulls" target="_blank" rel="noreferrer noopener">Pull requests</a>
+            <a href="https://github.com/shashankswe2020-ux/flowforge/blob/main/LICENSE" target="_blank" rel="noreferrer noopener">License</a>
+          </div>
+        </div>
+      </div>
+      <div class="footer__base">
+        <span>© <span id="year"></span> swe-forge contributors.</span>
+        <span>Built with LangGraph · MIT licensed.</span>
+      </div>
+    </footer>
+
+    <script src="script.js" defer></script>
+  </body>
+</html>

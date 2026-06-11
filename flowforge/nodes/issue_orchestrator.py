@@ -20,15 +20,25 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from flowforge.config.deep_agents import resolve_deep_agents_enabled
+from flowforge.deep_agents import AgentRole
+from flowforge.deep_agents.adapters import materialize_files
+from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.nodes._workspace import get_workdir
 from flowforge.state.models import (
+    DeepAgentTrace,
     Finding,
     GraphState,
     Issue,
     IssueDisposition,
     IssueSeverity,
+    ToolInvocationRecord,
 )
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +533,10 @@ def issue_orchestrator_node(
         return {"triaged_issues": [], "tool_operations": []}
 
     prioritized = _prioritize(deduped)
+
+    if resolve_deep_agents_enabled():
+        return _run_via_deep_agent(state, llm, deduped, prioritized)
+
     prompt = _build_prompt(prioritized)
     response = llm.invoke(prompt)
 
@@ -539,4 +553,178 @@ def issue_orchestrator_node(
     return {
         "triaged_issues": issues,
         "tool_operations": tool_operations,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Deep Agent variant (T8)
+# ---------------------------------------------------------------------------
+
+
+_ISSUES_VFS_PATH = "vfs:/context/issues_output.json"
+
+
+def _extract_issues(
+    result: dict[str, object],
+    deduped: dict[str, Finding],
+) -> list[Issue] | None:
+    """Parse the agent's triage output from the canonical VFS path."""
+    files = result.get("files")
+    if not isinstance(files, dict):
+        return None
+    raw = files.get(_ISSUES_VFS_PATH)
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    items = parsed.get("issues")
+    if not isinstance(items, list):
+        return None
+    return _parse_issue_items(items, deduped)
+
+
+def _parse_issue_items(
+    items: list[Any], deduped: dict[str, Finding],
+) -> list[Issue]:
+    """Build ``Issue`` objects from agent-produced list, dropping invalid rows."""
+    issues: list[Issue] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        fp = item.get("fingerprint")
+        if not isinstance(fp, str):
+            continue
+        finding = deduped.get(fp)
+        if finding is None:
+            continue
+        raw_disp = item.get("disposition")
+        if not isinstance(raw_disp, str):
+            continue
+        try:
+            disposition = IssueDisposition(raw_disp)
+        except ValueError:
+            continue
+        remediation = item.get("remediation")
+        if not isinstance(remediation, str):
+            remediation = ""
+        issues.append(
+            Issue(
+                id=f"issue-{fp[:8]}",
+                source_node=finding.source_node,
+                fingerprint=fp,
+                severity=finding.severity,
+                confidence=finding.confidence,
+                disposition=disposition,
+                remediation=remediation,
+                owner=item.get("owner") if isinstance(item.get("owner"), str) else None,
+                sla_target=(
+                    item.get("sla_target")
+                    if isinstance(item.get("sla_target"), str)
+                    else None
+                ),
+            ),
+        )
+    return issues
+
+
+def _run_via_deep_agent(
+    state: GraphState,
+    llm: LLMProtocol,
+    deduped: dict[str, Finding],
+    prioritized: list[tuple[str, Finding, str]],
+) -> dict[str, Any]:
+    """Deep Agent variant of ``issue_orchestrator_node`` (T8)."""
+    workdir = get_workdir(state)
+    files = materialize_files(state)
+
+    finding_lines: list[str] = []
+    for fp, f, category in prioritized:
+        finding_lines.append(
+            f"- fingerprint={fp} category={category} severity={f.severity} "
+            f"title={f.title} source={f.source_node}",
+        )
+    findings_summary = "\n".join(finding_lines)
+
+    graph = build_deep_agent(
+        role=AgentRole.TRIAGER,
+        llm=cast("BaseChatModel", llm),
+        workdir=workdir,
+    )
+    payload: dict[str, Any] = {
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    "Triage the following deduplicated findings. The full "
+                    "finding bodies are in vfs:/context/findings/. Use the "
+                    "dedupe_helper sub-agent to cluster overlapping issues "
+                    "before disposition. Write the final triage to "
+                    f"{_ISSUES_VFS_PATH} as a JSON object "
+                    '{"issues": [{"fingerprint", "disposition", '
+                    '"remediation", "owner", "sla_target"}]}.'
+                    "\n\n"
+                    f"Findings (pre-sorted by priority):\n{findings_summary}"
+                ),
+            },
+        ],
+        "files": files,
+    }
+    invocations: list[ToolInvocationRecord] = []
+    result = run_deep_agent_bounded(
+        graph,
+        payload,
+        role=AgentRole.TRIAGER,
+        node_name="issue_orchestrator_node",
+        invocation_sink=invocations,
+    )
+
+    issues = _extract_issues(result, deduped)
+    if issues is None:
+        # Fallback: re-run the legacy single-shot triage and skip emitting
+        # a partial trace, matching the contract used by the other deep
+        # wrappers (clarification / spec / plan).
+        prompt = _build_prompt(prioritized)
+        response = llm.invoke(prompt)
+        content = response.content if hasattr(response, "content") else str(response)
+        issues = _parse_issues(content, deduped)
+        tool_operations = _build_tool_operations(issues)
+        _commit_triage_to_repo(issues, deduped, prioritized, state)
+        _create_github_issues(issues, deduped, state)
+        return {
+            "triaged_issues": issues,
+            "tool_operations": tool_operations,
+        }
+
+    tool_operations = _build_tool_operations(issues)
+
+    raw_files = result.get("files")
+    vfs_keys: list[str] = (
+        sorted(k for k in raw_files if isinstance(k, str))
+        if isinstance(raw_files, dict)
+        else []
+    )
+    raw_messages = result.get("messages")
+    messages: list[dict[str, object]] = (
+        [m for m in raw_messages if isinstance(m, dict)]
+        if isinstance(raw_messages, list)
+        else []
+    )
+    trace = DeepAgentTrace(
+        role=AgentRole.TRIAGER,
+        messages_digest=DeepAgentTrace.digest_messages(messages),
+        vfs_keys=vfs_keys,
+        tool_invocations=invocations,
+    )
+
+    _commit_triage_to_repo(issues, deduped, prioritized, state)
+    _create_github_issues(issues, deduped, state)
+
+    return {
+        "triaged_issues": issues,
+        "tool_operations": tool_operations,
+        "deep_agent_traces": {"issue_orchestrator_node": trace},
     }

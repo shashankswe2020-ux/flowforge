@@ -8,16 +8,26 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from flowforge.config.deep_agents import resolve_deep_agents_enabled
+from flowforge.deep_agents import AgentRole
+from flowforge.deep_agents.adapters import materialize_files
+from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.nodes._workspace import get_workdir
 from flowforge.state.models import (
     AmbiguityStatus,
     ClarificationQA,
     ClarificationTranscript,
     ClarifiedRequest,
+    DeepAgentTrace,
     GraphState,
     RunStatus,
+    ToolInvocationRecord,
 )
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 # The 6 required dimensions per spec
 REQUIRED_DIMENSIONS: tuple[str, ...] = (
@@ -168,10 +178,20 @@ def clarification_node(
 ) -> dict[str, Any]:
     """Run clarification — interactive Q&A or auto-resolve all dimensions.
 
+    - If FLOWFORGE_DEEP_AGENTS=1 *and* state.auto_clarify=True: dispatch
+      through the Deep Agent runtime (T8). Interactive mode always uses
+      the legacy single-shot path.
     - If state.auto_clarify=True: makes ONE LLM call to resolve all dimensions.
     - If dimensions are unresolved: asks a question, returns waiting_for_input.
     - If all dimensions resolved: summarizes, produces ClarifiedRequest, stays RUNNING.
     """
+    if (
+        state.auto_clarify
+        and not state.clarified_request
+        and resolve_deep_agents_enabled()
+    ):
+        return _run_via_deep_agent(state, llm)
+
     # Auto-clarify mode (CLI / non-interactive flow)
     if state.auto_clarify and not state.clarified_request:
         prompt = _build_auto_clarify_prompt(state.request)
@@ -275,5 +295,181 @@ def clarification_node(
             unresolved_dimensions=unresolved,
             deferred_dimensions=list(state.ambiguity_status.deferred_dimensions),
             is_complete=False,
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Deep Agent variant (T8)
+# ---------------------------------------------------------------------------
+
+
+_CLARIFIED_VFS_PATH = "vfs:/context/clarified_request_output.json"
+
+
+def _extract_clarified_request(
+    result: dict[str, object],
+) -> tuple[ClarifiedRequest, dict[str, str]] | None:
+    """Parse ``vfs:/context/clarified_request.json`` into a ClarifiedRequest.
+
+    Returns the ClarifiedRequest plus the dimension-keyed answer dict
+    used to seed the transcript. ``None`` when the file is absent or
+    malformed (caller falls back to legacy).
+    """
+    files = result.get("files")
+    if not isinstance(files, dict):
+        return None
+    raw = files.get(_CLARIFIED_VFS_PATH)
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+
+    answers = {
+        dim: str(parsed.get(dim, ""))
+        for dim in REQUIRED_DIMENSIONS
+    }
+    summary = str(parsed.get("summary", ""))
+    clarified = _build_clarified_request(answers, summary)
+    return clarified, answers
+
+
+def _run_via_deep_agent(
+    state: GraphState, llm: LLMProtocol,
+) -> dict[str, Any]:
+    """Deep Agent variant of ``clarification_node`` (T8, auto mode only)."""
+    workdir = get_workdir(state)
+    files = materialize_files(state)
+    graph = build_deep_agent(
+        role=AgentRole.CLARIFIER,
+        llm=cast("BaseChatModel", llm),
+        workdir=workdir,
+    )
+    payload: dict[str, Any] = {
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    "Resolve every clarification dimension for the request "
+                    f"{state.request!r}. Write the final structured answer to "
+                    f"{_CLARIFIED_VFS_PATH} as a JSON object with keys "
+                    "solution_type, scope_size, target_users, "
+                    "delivery_boundaries, constraints, success_criteria, "
+                    "summary."
+                ),
+            },
+        ],
+        "files": files,
+    }
+    invocations: list[ToolInvocationRecord] = []
+    result = run_deep_agent_bounded(
+        graph,
+        payload,
+        role=AgentRole.CLARIFIER,
+        node_name="clarification_node",
+        invocation_sink=invocations,
+    )
+
+    extracted = _extract_clarified_request(result)
+    if extracted is None:
+        # Agent failed to produce structured output — fall back to legacy
+        # path so the pipeline does not stall on a malformed run.
+        return _legacy_auto_clarify(state, llm)
+
+    clarified, answers = extracted
+
+    raw_files = result.get("files")
+    vfs_keys: list[str] = (
+        sorted(k for k in raw_files if isinstance(k, str))
+        if isinstance(raw_files, dict)
+        else []
+    )
+    raw_messages = result.get("messages")
+    messages: list[dict[str, object]] = (
+        [m for m in raw_messages if isinstance(m, dict)]
+        if isinstance(raw_messages, list)
+        else []
+    )
+    trace = DeepAgentTrace(
+        role=AgentRole.CLARIFIER,
+        messages_digest=DeepAgentTrace.digest_messages(messages),
+        vfs_keys=vfs_keys,
+        tool_invocations=invocations,
+    )
+
+    now = datetime.now(tz=UTC)
+    exchanges = [
+        ClarificationQA(
+            question=f"[deep] {dim}",
+            answer=answers[dim],
+            dimension=dim,
+            timestamp=now,
+        )
+        for dim in REQUIRED_DIMENSIONS
+    ]
+
+    return {
+        "run_status": RunStatus.RUNNING,
+        "clarified_request": clarified,
+        "clarification_transcript": ClarificationTranscript(exchanges=exchanges),
+        "ambiguity_status": AmbiguityStatus(
+            score=0.0,
+            unresolved_dimensions=[],
+            deferred_dimensions=[],
+            is_complete=True,
+        ),
+        "deep_agent_traces": {"clarification_node": trace},
+    }
+
+
+def _legacy_auto_clarify(
+    state: GraphState, llm: LLMProtocol,
+) -> dict[str, Any]:
+    """Run the legacy auto-clarify single-shot path.
+
+    Used as a deterministic fallback when the deep-agent run does not
+    produce a parseable structured output.
+    """
+    prompt = _build_auto_clarify_prompt(state.request)
+    response = llm.invoke(prompt)
+    content = response.content if hasattr(response, "content") else str(response)
+
+    content = content.strip()
+    if content.startswith("```"):
+        lines = content.split("\n")
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        content = "\n".join(lines)
+
+    parsed = json.loads(content)
+    summary = parsed.get("summary", "")
+    answers = {dim: parsed.get(dim, "") for dim in REQUIRED_DIMENSIONS}
+
+    now = datetime.now(tz=UTC)
+    exchanges = [
+        ClarificationQA(
+            question=f"[auto] {dim}",
+            answer=answers[dim],
+            dimension=dim,
+            timestamp=now,
+        )
+        for dim in REQUIRED_DIMENSIONS
+    ]
+    clarified_request = _build_clarified_request(answers, summary)
+
+    return {
+        "run_status": RunStatus.RUNNING,
+        "clarified_request": clarified_request,
+        "clarification_transcript": ClarificationTranscript(exchanges=exchanges),
+        "ambiguity_status": AmbiguityStatus(
+            score=0.0,
+            unresolved_dimensions=[],
+            deferred_dimensions=[],
+            is_complete=True,
         ),
     }

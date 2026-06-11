@@ -26,7 +26,13 @@ from flowforge.deep_agents.adapters import (
 )
 from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
 from flowforge.nodes._workspace import get_workdir
-from flowforge.state.models import DeepAgentTrace, Finding, GraphState, IssueSeverity
+from flowforge.state.models import (
+    DeepAgentTrace,
+    Finding,
+    GraphState,
+    IssueSeverity,
+    ToolInvocationRecord,
+)
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
@@ -442,11 +448,13 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         ],
         "files": files,
     }
+    invocations: list[ToolInvocationRecord] = []
     result = run_deep_agent_bounded(
         graph,
         payload,
         role=AgentRole.REVIEWER,
         node_name="code_review_node",
+        invocation_sink=invocations,
     )
 
     findings = [
@@ -468,6 +476,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         role=AgentRole.REVIEWER,
         messages_digest=DeepAgentTrace.digest_messages(messages),
         vfs_keys=vfs_keys,
+        tool_invocations=invocations,
     )
 
     metadata: dict[str, Any] = {

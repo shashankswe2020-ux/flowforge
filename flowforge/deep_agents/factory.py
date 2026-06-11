@@ -145,6 +145,55 @@ def _consume_tool_budget(tool_name: str) -> None:
     budget.invocations.append(ToolInvocationRecord(tool=tool_name, ok=True))
 
 
+def _extract_subagent_dispatches(messages: object) -> list[ToolInvocationRecord]:
+    """Synthesise records for every ``task`` tool dispatch in ``messages``.
+
+    The deepagents-built ``task`` tool is not FlowForge-wrapped, so it
+    does not flow through :func:`_consume_tool_budget`. Walking the
+    message stream after the run gives every parent → child dispatch a
+    :class:`ToolInvocationRecord` whose ``parent`` field carries the
+    sub-agent name (spec §7.1, T8 acceptance criterion).
+    """
+    if not isinstance(messages, list):
+        return []
+    records: list[ToolInvocationRecord] = []
+    for msg in messages:
+        tool_calls: object = getattr(msg, "tool_calls", None)
+        if tool_calls is None and isinstance(msg, dict):
+            tool_calls = msg.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        for tc in tool_calls:
+            name: object = None
+            raw_args: object = None
+            if isinstance(tc, dict):
+                name = tc.get("name")
+                raw_args = tc.get("args")
+                if raw_args is None:
+                    raw_args = tc.get("arguments")
+            else:
+                name = getattr(tc, "name", None)
+                raw_args = getattr(tc, "args", None)
+                if raw_args is None:
+                    raw_args = getattr(tc, "arguments", None)
+            if name != "task":
+                continue
+            args: dict[str, object] = raw_args if isinstance(raw_args, dict) else {}
+            subagent: object = (
+                args.get("subagent_type")
+                or args.get("subagent")
+                or args.get("name")
+            )
+            records.append(
+                ToolInvocationRecord(
+                    tool="task",
+                    ok=True,
+                    parent=subagent if isinstance(subagent, str) else None,
+                ),
+            )
+    return records
+
+
 def _resolve_positive_int(env_var: str, default: int) -> int:
     raw = os.environ.get(env_var)
     if raw is None:
@@ -178,6 +227,7 @@ def run_deep_agent_bounded(
     node_name: str,
     timeout_s: float | None = None,
     tool_budget: int | None = None,
+    invocation_sink: list[ToolInvocationRecord] | None = None,
 ) -> dict[str, object]:
     """Invoke ``graph`` with wall-clock + tool-budget caps.
 
@@ -190,6 +240,10 @@ def run_deep_agent_bounded(
             :func:`_resolve_timeout_s`.
         tool_budget: Max tool invocations; defaults to
             :func:`_resolve_tool_budget`.
+        invocation_sink: Optional list extended with the captured
+            :class:`ToolInvocationRecord` entries on completion (and
+            also on error paths). Lets wrappers stamp trace metadata
+            without exposing the run-budget context var.
 
     Returns:
         The raw ``graph.invoke`` result.
@@ -239,6 +293,9 @@ def run_deep_agent_bounded(
             raise TypeError(
                 f"graph.invoke must return a dict (got {type(result).__name__})",
             )
+        # Spec §7.1 / T8: surface parent → child sub-agent dispatches
+        # that the deepagents-built ``task`` tool would otherwise hide.
+        budget.invocations.extend(_extract_subagent_dispatches(result.get("messages")))
         return result
     finally:
         # Audit HIGH-2: never block the caller on a wedged worker.
@@ -248,6 +305,8 @@ def run_deep_agent_bounded(
         # caller is freed regardless. The orphan thread is bounded by
         # the per-subprocess timeout enforced inside ``_run_subprocess``.
         executor.shutdown(wait=False, cancel_futures=True)
+        if invocation_sink is not None:
+            invocation_sink.extend(budget.invocations)
         _BUDGET_VAR.reset(token)
 
 

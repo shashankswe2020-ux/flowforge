@@ -16,17 +16,30 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
+from flowforge.config.deep_agents import resolve_deep_agents_enabled
 from flowforge.dag.validator import validate_dag
+from flowforge.deep_agents import AgentRole
+from flowforge.deep_agents.adapters import materialize_files
+from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.nodes._workspace import get_workdir
 from flowforge.state.models import (
+    DeepAgentTrace,
     GraphState,
     ImplementationPlan,
     RunStatus,
     TaskDAG,
     TaskDefinition,
     TaskDependency,
+    ToolInvocationRecord,
 )
+from flowforge.state.models import (
+    CapabilityType as _CapabilityType,
+)
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 
 class LLMProtocol(Protocol):
@@ -205,6 +218,9 @@ def plan_node(
     """
     if state.spec is None:
         raise SpecMissingError()
+
+    if resolve_deep_agents_enabled():
+        return _run_via_deep_agent(state, llm)
 
     prompt = _build_prompt(state)
     response = llm.invoke(prompt)
@@ -408,3 +424,163 @@ def _commit_plan_to_repo(
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
+
+
+# ---------------------------------------------------------------------------
+# Deep Agent variant (T8)
+# ---------------------------------------------------------------------------
+
+
+_PLAN_VFS_PATH = "vfs:/context/plan_output.json"
+
+
+def _build_plan_from_parsed(
+    parsed: dict[str, Any],
+) -> tuple[dict[str, Any], ImplementationPlan]:
+    """Build an ``ImplementationPlan`` from a parsed JSON payload.
+
+    Shared between the legacy and deep paths so DAG validation and
+    normalization behave identically.
+    """
+    tasks: list[TaskDefinition] = []
+    for t in parsed.get("tasks", []):
+        complexity = _normalize_complexity(t.get("estimated_complexity", "s"))
+        capability = _CapabilityType(
+            _normalize_capability(t.get("capability_type", "agent_only")),
+        )
+        tasks.append(
+            TaskDefinition(
+                task_id=t["task_id"],
+                title=t["title"],
+                description=t["description"],
+                acceptance_checks=t["acceptance_checks"],
+                estimated_complexity=complexity,
+                capability_type=capability,
+                verification_step=t.get("verification_step", ""),
+            ),
+        )
+    edges = [
+        TaskDependency(from_task_id=e["from_task_id"], to_task_id=e["to_task_id"])
+        for e in parsed.get("edges", [])
+    ]
+    dag = TaskDAG(
+        tasks=tasks,
+        edges=edges,
+        plan_revision=parsed.get("plan_revision", 1),
+    )
+    validate_dag(dag)
+    plan = ImplementationPlan(
+        phases=parsed.get("phases", []),
+        dag=dag,
+        plan_revision=dag.plan_revision,
+    )
+    return parsed, plan
+
+
+def _extract_plan(
+    result: dict[str, object],
+) -> tuple[dict[str, Any], ImplementationPlan] | None:
+    """Parse the agent's plan JSON from the canonical VFS path."""
+    files = result.get("files")
+    if not isinstance(files, dict):
+        return None
+    raw = files.get(_PLAN_VFS_PATH)
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict) or "tasks" not in parsed:
+        return None
+    return _build_plan_from_parsed(parsed)
+
+
+def _run_via_deep_agent(
+    state: GraphState, llm: LLMProtocol,
+) -> dict[str, Any]:
+    """Deep Agent variant of ``plan_node`` (T8)."""
+    workdir = get_workdir(state)
+    files = materialize_files(state)
+    graph = build_deep_agent(
+        role=AgentRole.PLANNER,
+        llm=cast("BaseChatModel", llm),
+        workdir=workdir,
+    )
+    payload: dict[str, Any] = {
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    "Decompose the spec at vfs:/context/spec.json into a "
+                    "vertically-sliced implementation plan. Write the final "
+                    f"plan JSON to {_PLAN_VFS_PATH}. The JSON must include "
+                    "phases, tasks (with task_id, title, description, "
+                    "acceptance_checks, verification_step, "
+                    "estimated_complexity, capability_type), edges, and "
+                    "plan_revision. Use the planner sub-agents (estimator) "
+                    "for sizing."
+                ),
+            },
+        ],
+        "files": files,
+    }
+    invocations: list[ToolInvocationRecord] = []
+    result = run_deep_agent_bounded(
+        graph,
+        payload,
+        role=AgentRole.PLANNER,
+        node_name="plan_node",
+        invocation_sink=invocations,
+    )
+
+    extracted = _extract_plan(result)
+    if extracted is None:
+        return _legacy_plan(state, llm)
+    parsed, plan = extracted
+
+    raw_files = result.get("files")
+    vfs_keys: list[str] = (
+        sorted(k for k in raw_files if isinstance(k, str))
+        if isinstance(raw_files, dict)
+        else []
+    )
+    raw_messages = result.get("messages")
+    messages: list[dict[str, object]] = (
+        [m for m in raw_messages if isinstance(m, dict)]
+        if isinstance(raw_messages, list)
+        else []
+    )
+    trace = DeepAgentTrace(
+        role=AgentRole.PLANNER,
+        messages_digest=DeepAgentTrace.digest_messages(messages),
+        vfs_keys=vfs_keys,
+        tool_invocations=invocations,
+    )
+
+    _commit_plan_to_repo(parsed, plan, state)
+
+    return {
+        "run_status": RunStatus.RUNNING,
+        "implementation_plan": plan,
+        "deep_agent_traces": {"plan_node": trace},
+    }
+
+
+def _legacy_plan(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
+    """Legacy single-shot fallback (extracted for fallback reuse)."""
+    prompt = _build_prompt(state)
+    response = llm.invoke(prompt)
+    content = response.content if hasattr(response, "content") else str(response)
+    content = content.strip()
+    if content.startswith("```"):
+        lines = content.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        content = "\n".join(lines)
+    parsed = json.loads(content)
+    parsed, plan = _build_plan_from_parsed(parsed)
+    _commit_plan_to_repo(parsed, plan, state)
+    return {"run_status": RunStatus.RUNNING, "implementation_plan": plan}

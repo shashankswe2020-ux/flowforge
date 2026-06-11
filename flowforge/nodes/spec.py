@@ -12,9 +12,23 @@ The spec is the shared source of truth — defines what to build, why, and how t
 from __future__ import annotations
 
 import json
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from flowforge.state.models import GraphState, RunStatus, SpecOutput
+from flowforge.config.deep_agents import resolve_deep_agents_enabled
+from flowforge.deep_agents import AgentRole
+from flowforge.deep_agents.adapters import materialize_files
+from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.nodes._workspace import get_workdir
+from flowforge.state.models import (
+    DeepAgentTrace,
+    GraphState,
+    RunStatus,
+    SpecOutput,
+    ToolInvocationRecord,
+)
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 
 class LLMProtocol(Protocol):
@@ -204,6 +218,9 @@ def spec_node(
     """
     _validate_clarification(state)
 
+    if resolve_deep_agents_enabled():
+        return _run_via_deep_agent(state, llm)
+
     prompt = _build_prompt(state)
     response = llm.invoke(prompt)
 
@@ -379,3 +396,138 @@ def _commit_spec_to_repo(spec: SpecOutput, state: GraphState) -> None:
     except (subprocess.CalledProcessError, FileNotFoundError):
         # Not in a git repo or git not available — skip silently
         pass
+
+
+# ---------------------------------------------------------------------------
+# Deep Agent variant (T8)
+# ---------------------------------------------------------------------------
+
+
+_SPEC_VFS_PATH = "vfs:/context/spec_output.json"
+
+
+def _build_spec_output(parsed: dict[str, Any]) -> SpecOutput:
+    """Build SpecOutput from a parsed JSON payload (legacy + deep share this)."""
+    return SpecOutput(
+        artifact_path=parsed.get("artifact_path", "docs/spec/spec.md"),
+        summary=parsed.get("summary", ""),
+        objective=parsed.get("objective", ""),
+        target_users=parsed.get("target_users", ""),
+        acceptance_criteria=parsed.get("acceptance_criteria", []),
+        assumptions=parsed.get("assumptions", []),
+        open_questions=parsed.get("open_questions", []),
+        tech_stack=parsed.get("tech_stack", []),
+        commands=parsed.get("commands", {}),
+        project_structure=parsed.get("project_structure", []),
+        code_style=parsed.get("code_style", []),
+        security_considerations=parsed.get("security_considerations", []),
+        testing_strategy=parsed.get("testing_strategy", []),
+        boundaries=parsed.get("boundaries", {}),
+    )
+
+
+def _extract_spec(result: dict[str, object]) -> SpecOutput | None:
+    """Parse the agent's structured spec output from VFS, if present."""
+    files = result.get("files")
+    if not isinstance(files, dict):
+        return None
+    raw = files.get(_SPEC_VFS_PATH)
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return _build_spec_output(parsed)
+
+
+def _run_via_deep_agent(
+    state: GraphState, llm: LLMProtocol,
+) -> dict[str, Any]:
+    """Deep Agent variant of ``spec_node`` (T8)."""
+    workdir = get_workdir(state)
+    files = materialize_files(state)
+    graph = build_deep_agent(
+        role=AgentRole.SPEC_AUTHOR,
+        llm=cast("BaseChatModel", llm),
+        workdir=workdir,
+    )
+    payload: dict[str, Any] = {
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    "Produce a structured specification document for the "
+                    "clarified request stored at "
+                    "vfs:/context/clarified_request.json and the project "
+                    "state. Write the final SpecOutput JSON to "
+                    f"{_SPEC_VFS_PATH}. Use the spec-author six-area "
+                    "methodology and ensure every acceptance criterion is "
+                    "verifiable."
+                ),
+            },
+        ],
+        "files": files,
+    }
+    invocations: list[ToolInvocationRecord] = []
+    result = run_deep_agent_bounded(
+        graph,
+        payload,
+        role=AgentRole.SPEC_AUTHOR,
+        node_name="spec_node",
+        invocation_sink=invocations,
+    )
+
+    spec = _extract_spec(result)
+    if spec is None:
+        # Fallback: re-run the legacy single-shot path so callers always
+        # see a valid SpecOutput when clarification is complete.
+        return _legacy_spec(state, llm)
+
+    raw_files = result.get("files")
+    vfs_keys: list[str] = (
+        sorted(k for k in raw_files if isinstance(k, str))
+        if isinstance(raw_files, dict)
+        else []
+    )
+    raw_messages = result.get("messages")
+    messages: list[dict[str, object]] = (
+        [m for m in raw_messages if isinstance(m, dict)]
+        if isinstance(raw_messages, list)
+        else []
+    )
+    trace = DeepAgentTrace(
+        role=AgentRole.SPEC_AUTHOR,
+        messages_digest=DeepAgentTrace.digest_messages(messages),
+        vfs_keys=vfs_keys,
+        tool_invocations=invocations,
+    )
+
+    _commit_spec_to_repo(spec, state)
+
+    return {
+        "run_status": RunStatus.RUNNING,
+        "spec": spec,
+        "deep_agent_traces": {"spec_node": trace},
+    }
+
+
+def _legacy_spec(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
+    """Legacy single-shot fallback (extracted for fallback reuse)."""
+    prompt = _build_prompt(state)
+    response = llm.invoke(prompt)
+    content = response.content if hasattr(response, "content") else str(response)
+    content = content.strip()
+    if content.startswith("```"):
+        lines = content.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        content = "\n".join(lines)
+    parsed = json.loads(content)
+    spec = _build_spec_output(parsed)
+    _commit_spec_to_repo(spec, state)
+    return {"run_status": RunStatus.RUNNING, "spec": spec}

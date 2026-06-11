@@ -85,6 +85,8 @@ def materialize_files(state: GraphState) -> dict[str, str]:
 
     * ``vfs:/<artifact.path>`` — content of every ``TaskArtifact`` on
       ``state.tasks``.
+    * ``vfs:/context/clarified_request.json`` — JSON dump of
+      ``state.clarified_request``.
     * ``vfs:/context/spec.json`` — JSON dump of ``state.spec``.
     * ``vfs:/context/plan.json`` — JSON dump of
       ``state.implementation_plan``.
@@ -107,6 +109,11 @@ def materialize_files(state: GraphState) -> dict[str, str]:
                     "must be relative without '..' segments",
                 )
             files[f"{_VFS_PREFIX}{rel}"] = artifact.content
+
+    if state.clarified_request is not None:
+        files["vfs:/context/clarified_request.json"] = (
+            state.clarified_request.model_dump_json()
+        )
 
     if state.spec is not None:
         files["vfs:/context/spec.json"] = state.spec.model_dump_json()

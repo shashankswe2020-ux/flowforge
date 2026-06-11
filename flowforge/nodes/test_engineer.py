@@ -33,6 +33,7 @@ from flowforge.state.models import (
     GraphState,
     IssueSeverity,
     TaskDefinition,
+    ToolInvocationRecord,
 )
 
 if TYPE_CHECKING:
@@ -486,11 +487,13 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         ],
         "files": files,
     }
+    invocations: list[ToolInvocationRecord] = []
     result = run_deep_agent_bounded(
         graph,
         payload,
         role=AgentRole.TESTER,
         node_name="test_engineer_node",
+        invocation_sink=invocations,
     )
 
     findings = [
@@ -514,6 +517,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         role=AgentRole.TESTER,
         messages_digest=DeepAgentTrace.digest_messages(messages),
         vfs_keys=vfs_keys,
+        tool_invocations=invocations,
     )
 
     metadata: dict[str, Any] = {

@@ -36,12 +36,13 @@ from flowforge.deep_agents.factory import (
     DEFAULT_TIMEOUT_S,
     DEFAULT_TOOL_BUDGET,
     _consume_tool_budget,
+    _extract_subagent_dispatches,
     _resolve_timeout_s,
     _resolve_tool_budget,
     _RunBudget,
     run_deep_agent_bounded,
 )
-from flowforge.state.models import DeepAgentTrace
+from flowforge.state.models import DeepAgentTrace, ToolInvocationRecord
 
 # ---------------------------------------------------------------------------
 # Resolution of env knobs
@@ -294,3 +295,109 @@ class TestRunDeepAgentBounded:
             f"AgentTimeoutError took {elapsed:.2f}s to surface "
             "(expected < 1.5s; ThreadPoolExecutor.shutdown likely blocking)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Sub-agent dispatch extraction (T8)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSubagentDispatches:
+    """Cover ``_extract_subagent_dispatches`` independent of the runtime."""
+
+    def test_returns_empty_for_non_list(self) -> None:
+        assert _extract_subagent_dispatches(None) == []
+        assert _extract_subagent_dispatches({}) == []
+        assert _extract_subagent_dispatches("not a list") == []
+
+    def test_extracts_dict_message_task_call(self) -> None:
+        messages = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "tc1",
+                        "name": "task",
+                        "args": {"subagent_type": "researcher"},
+                    },
+                ],
+            },
+        ]
+        records = _extract_subagent_dispatches(messages)
+        assert len(records) == 1
+        assert records[0].tool == "task"
+        assert records[0].parent == "researcher"
+        assert records[0].ok is True
+
+    def test_extracts_object_message_task_call(self) -> None:
+        class _Msg:
+            tool_calls = [
+                {"name": "task", "args": {"subagent": "estimator"}},
+            ]
+
+        records = _extract_subagent_dispatches([_Msg()])
+        assert len(records) == 1
+        assert records[0].parent == "estimator"
+
+    def test_falls_back_to_arguments_key(self) -> None:
+        messages = [
+            {
+                "tool_calls": [
+                    {"name": "task", "arguments": {"name": "dedupe_helper"}},
+                ],
+            },
+        ]
+        records = _extract_subagent_dispatches(messages)
+        assert len(records) == 1
+        assert records[0].parent == "dedupe_helper"
+
+    def test_skips_non_task_calls(self) -> None:
+        messages = [
+            {"tool_calls": [{"name": "run_tests", "args": {}}]},
+        ]
+        assert _extract_subagent_dispatches(messages) == []
+
+    def test_records_none_parent_when_subagent_missing(self) -> None:
+        messages = [
+            {"tool_calls": [{"name": "task", "args": {}}]},
+        ]
+        records = _extract_subagent_dispatches(messages)
+        assert len(records) == 1
+        assert records[0].parent is None
+
+
+class TestRunDeepAgentInvocationSink:
+    """End-to-end invocation_sink covers tool calls + sub-agent dispatches."""
+
+    def test_sink_extends_with_consumed_tools_and_task_dispatches(self) -> None:
+        def fn(_payload: dict[str, object]) -> dict[str, object]:
+            _consume_tool_budget("run_tests")
+            return {
+                "messages": [
+                    {
+                        "tool_calls": [
+                            {
+                                "name": "task",
+                                "args": {"subagent_type": "researcher"},
+                            },
+                        ],
+                    },
+                ],
+            }
+
+        graph = _FakeGraph(fn)
+        sink: list[ToolInvocationRecord] = []
+        run_deep_agent_bounded(
+            graph,  # type: ignore[arg-type]
+            {},
+            role=AgentRole.REVIEWER,
+            node_name="code_review_node",
+            timeout_s=5,
+            tool_budget=10,
+            invocation_sink=sink,
+        )
+        tools = [r.tool for r in sink]
+        parents = [r.parent for r in sink]
+        assert "run_tests" in tools
+        assert "task" in tools
+        assert "researcher" in parents

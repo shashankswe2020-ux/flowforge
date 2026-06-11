@@ -10,7 +10,7 @@
 
 ## 1. Objective
 
-Upgrade the existing 10-node FlowForge LangGraph pipeline (`clarification → spec → plan → fan-out tasks → parallel quality gates → triage → ship`) so that the **agentic nodes** are powered by **LangChain Deep Agents** instead of single-shot LLM invocations.
+Upgrade the existing FlowForge LangGraph pipeline (`clarification → spec → plan → fan-out tasks → parallel quality gates → triage → ship`) so that the **agentic nodes** are powered by **LangChain Deep Agents** instead of single-shot LLM invocations.
 
 Deep Agents introduce four primitives that the current pipeline lacks:
 
@@ -188,7 +188,9 @@ flowforge/
 build_deep_agent(
     role: AgentRole,                # enum
     llm: ChatModel,                 # via existing adapter
-    workdir: Path,                  # generated-repo workdir; tools constrain writes here
+    workdir: Path,                  # generated-repo workdir; tools constrain writes here.
+                                    # `GraphState.workdir` is `str | None` today; the factory
+                                    # normalizes it to `Path` internally and rejects `None`.
     todo_seed: list[str] | None,    # optional initial plan
     extra_tools: list[Tool] = [],
 ) -> CompiledStateGraph
@@ -228,7 +230,7 @@ Beyond the framework's built-in `write_todos` / `ls` / `read_file` / `write_file
 | `run_tests(path?)`       | implementer, tester              | Runs `pytest -q` (or detected runner) inside `workdir`; returns junit-style summary. |
 | `run_lint()`             | implementer, reviewer            | Runs `ruff check .` (or detected linter); returns findings JSON.            |
 | `run_typecheck()`        | implementer, reviewer            | Runs `mypy` (or detected type-checker); returns findings JSON.              |
-| `git_status()`           | implementer, ship-prep           | Shadow of `git status --porcelain` — read-only.                             |
+| `git_status()`           | implementer, reviewer            | Shadow of `git status --porcelain` — read-only.                             |
 | `git_diff(rev?)`         | reviewer, auditor                | Read-only diff against `HEAD` or named revision.                            |
 | `gh_issue_create(...)`   | triager                          | Wraps `gh issue create`; idempotent via title hash.                         |
 | `gh_label_ensure(...)`   | triager                          | Ensures label exists.                                                       |
@@ -238,7 +240,7 @@ Beyond the framework's built-in `write_todos` / `ls` / `read_file` / `write_file
 Tool requirements:
 
 1. Every tool is a **typed Python function** with a Pydantic input schema. No `Any` in production tool signatures.
-2. Every tool is **side-effect-bounded** to `state.workdir`. Path-traversal escapes are rejected with a typed `ToolPolicyError`.
+2. Every tool is **side-effect-bounded** to `state.workdir`. Path-traversal escapes are rejected with `PathTraversalError`, disallowed tools with `ToolNotAllowedError`, and schema violations with `ToolSchemaViolationError` (see `flowforge/tools/policy.py`).
 3. Every tool emits a **telemetry event** (`tool.invoked`, `tool.succeeded`, `tool.failed`) consumed by the existing run logger.
 4. Long-running tools (`run_tests`, `web_search`) are **interruptible** via the LangGraph checkpointer.
 
@@ -401,7 +403,7 @@ Each criterion is verifiable via a `pytest` test or a shell command.
 | 5 | Contract tests pass for every agentic node (legacy ↔ deep-agent shape equivalence).                    | `pytest tests/contract/test_legacy_vs_deep.py`                                            |
 | 6 | E2E demo run (`build tic-tac-toe web app`) completes with `--use-deep-agents`.                         | `swe-forge run "build tic-tac-toe web app" --repo demo --no-studio --use-deep-agents`     |
 | 7 | All 441 existing tests still pass.                                                                     | `pytest tests/ -q`                                                                        |
-| 8 | `mypy flowforge` passes with no `Any` in `flowforge/deep_agents/`.                                     | `mypy flowforge && rg --type py "Any" flowforge/deep_agents/ \| rg -v "from typing"`       |
+| 8 | `mypy flowforge` passes with no `Any` in `flowforge/deep_agents/`.                                     | `mypy flowforge && rg --type py "Any" flowforge/deep_agents/ &#124; rg -v "from typing"`       |
 | 9 | `ruff check flowforge tests` passes.                                                                   | `ruff check flowforge tests`                                                              |
 |10 | `DeepAgentTrace` appears in `GraphState` after every agentic node in Studio.                           | Manual: `langgraph dev`, run pipeline, inspect state at each step.                        |
 |11 | Recursion limit and timeout enforced; runaway agent fails with typed error.                            | `pytest tests/deep_agents/test_limits.py`                                                 |

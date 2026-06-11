@@ -93,8 +93,18 @@ def test_stubs_raise_not_implemented() -> None:
     with pytest.raises(tools.PathTraversalError):
         tools._safe_path(Path("/tmp"), "/etc/passwd")
 
-    with pytest.raises(NotImplementedError):
-        adapters.state_to_input(None, seed_prompt="x")  # type: ignore[arg-type]
+    payload = adapters.state_to_input(
+        GraphState(request="x"),
+        seed_prompt="x",
+    )
+    assert payload["messages"] == [{"role": "user", "content": "x"}]
+    assert payload["files"] == {}
 
-    with pytest.raises(NotImplementedError):
-        adapters.apply_agent_result(None, {}, node_name="x")  # type: ignore[arg-type]
+    result = adapters.apply_agent_result(
+        GraphState(request="x"),
+        {},
+        node_name="x",
+    )
+    assert result["deep_agent_node_name"] == "x"
+    assert result["deep_agent_changed_paths"] == []
+    assert result["deep_agent_findings"] == []

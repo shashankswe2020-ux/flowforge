@@ -29,6 +29,7 @@ from flowforge.nodes import issue_orchestrator as iorch_module
 from flowforge.nodes import plan as plan_module
 from flowforge.nodes import security_audit as sa_module
 from flowforge.nodes import spec as spec_module
+from flowforge.nodes import task_runner as task_module
 from flowforge.nodes import test_engineer as te_module
 from flowforge.nodes.clarification import REQUIRED_DIMENSIONS, clarification_node
 from flowforge.nodes.code_review import code_review_node
@@ -39,6 +40,7 @@ from flowforge.nodes.issue_orchestrator import (
 from flowforge.nodes.plan import plan_node
 from flowforge.nodes.security_audit import security_audit_node
 from flowforge.nodes.spec import spec_node
+from flowforge.nodes.task_runner import task_node
 from flowforge.nodes.test_engineer import test_engineer_node
 from flowforge.state.models import (
     AmbiguityStatus,
@@ -48,12 +50,14 @@ from flowforge.state.models import (
     DeepAgentTrace,
     Finding,
     GraphState,
+    ImplementationPlan,
     Issue,
     IssueSeverity,
     RunStatus,
     SpecOutput,
     Task,
     TaskArtifact,
+    TaskDAG,
     TaskDefinition,
     TaskStatus,
 )
@@ -684,6 +688,56 @@ def _triager_deep_result(state: GraphState) -> Mapping[str, object]:
     }
 
 
+def _implementer_state(workdir: str) -> GraphState:
+    Path(workdir).mkdir(parents=True, exist_ok=True)
+    defn = TaskDefinition(
+        task_id="t1",
+        title="Add greet()",
+        description="Implement greet() returning 'hi'.",
+        acceptance_checks=["greet returns 'hi'"],
+        estimated_complexity="xs",
+        capability_type=CapabilityType.AGENT_ONLY,
+        verification_step="pytest tests/test_greet.py -q",
+    )
+    plan = ImplementationPlan(
+        phases=["Phase 1"],
+        dag=TaskDAG(tasks=[defn], edges=[]),
+    )
+    return GraphState(
+        request="Build greet().",
+        run_status=RunStatus.RUNNING,
+        workdir=workdir,
+        implementation_plan=plan,
+    )
+
+
+def _implementer_legacy_response() -> str:
+    return json.dumps(
+        {
+            "status": "succeeded",
+            "artifacts": [
+                {
+                    "artifact_id": "a1",
+                    "artifact_type": "source",
+                    "path": "src/greet.py",
+                    "fingerprint": "x",
+                    "content": "def greet():\n    return 'hi'\n",
+                },
+            ],
+            "verification_evidence": ["pytest tests/test_greet.py -q -> 1 passed"],
+        },
+    )
+
+
+def _implementer_deep_result(_state: GraphState) -> Mapping[str, object]:
+    return {
+        "messages": [{"role": "assistant", "content": "implementer done"}],
+        "files": {
+            "vfs:/src/greet.py": "def greet():\n    return 'hi'\n",
+        },
+    }
+
+
 _GENERATIVE_CASES: tuple[GenerativeCase, ...] = (
     GenerativeCase(
         node_name="clarification_node",
@@ -748,6 +802,17 @@ _GENERATIVE_CASES: tuple[GenerativeCase, ...] = (
         commit_attrs=("_commit_triage_to_repo", "_create_github_issues"),
         assert_keys=("triaged_issues", "tool_operations"),
         primary_key="triaged_issues",
+    ),
+    GenerativeCase(
+        node_name="task_node",
+        node_module=task_module,
+        node_fn=task_node,
+        state_factory=_implementer_state,
+        legacy_response_factory=lambda _s: _implementer_legacy_response(),
+        deep_result_factory=_implementer_deep_result,
+        commit_attrs=("_commit_artifacts",),
+        assert_keys=("tasks",),
+        primary_key="tasks",
     ),
 )
 

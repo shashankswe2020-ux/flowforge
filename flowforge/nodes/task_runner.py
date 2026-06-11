@@ -1,18 +1,50 @@
 """Real task_node implementation — executes tasks via LLM and writes generated
 source files into ``state.workdir`` so downstream review/security/test gates
 analyze actual code instead of an empty workspace.
+
+When ``FLOWFORGE_DEEP_AGENTS=1`` (T9), each task is dispatched through the
+``implementer`` Deep Agent (with ``refactorer`` and ``doc_writer`` sub-agents).
+After each task the wrapper scans the generated diff for high-confidence
+secrets and blocks the run if any are found (spec §13.14).
 """
 
 from __future__ import annotations
 
+import difflib
+import json
 import subprocess
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Final, cast
 
+from flowforge.config.deep_agents import resolve_deep_agents_enabled
+from flowforge.deep_agents import AgentRole
+from flowforge.deep_agents.adapters import (
+    PathTraversalError,
+    _safe_resolve,
+    materialize_files,
+    persist_files,
+)
+from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.deep_agents.secret_scanner import (
+    SecretFinding,
+    has_blocking_secret,
+    scan_diff,
+)
 from flowforge.nodes._workspace import get_workdir
 from flowforge.nodes.capability import LLMProtocol, TaskExecutionResult
 from flowforge.nodes.task_executor import execute_task
-from flowforge.state.models import GraphState, Task, TaskStatus
+from flowforge.state.models import (
+    DeepAgentTrace,
+    GraphState,
+    RunStatus,
+    Task,
+    TaskStatus,
+    ToolInvocationRecord,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from langchain_core.language_models import BaseChatModel
 
 MAX_TASK_ATTEMPTS = 3
 
@@ -66,6 +98,12 @@ def task_node(state: GraphState, *, llm: LLMProtocol) -> dict[str, Any]:
     plan = state.implementation_plan
     if plan is None or not plan.dag.tasks:
         return {"tasks": []}
+
+    if resolve_deep_agents_enabled():
+        deep_result = _run_via_deep_agent(state, llm)
+        if deep_result is not None:
+            return deep_result
+        # Deep path returned None — fall through to legacy execution.
 
     workdir = get_workdir(state)
     completed: list[Task] = []
@@ -128,3 +166,249 @@ def _commit_artifacts(workdir: Path, paths: list[Path]) -> None:
         )
     except subprocess.CalledProcessError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Deep Agent variant (T9, spec \u00a713.14)
+# ---------------------------------------------------------------------------
+
+
+_IMPLEMENTER_VFS_PATH = "vfs:/context/implementer_output.json"
+# Cap on-disk reads during pre-persist scanning to bound memory and avoid
+# hangs on FIFOs/devices the agent could not normally produce, but a
+# pre-existing workdir might contain.
+_SCAN_READ_BYTES_CAP: Final[int] = 2 * 1024 * 1024  # 2 MiB
+
+
+def _build_task_prompt(task_definition: Any) -> str:  # noqa: ANN401 -- TaskDefinition
+    acceptance = "\n".join(f"- {c}" for c in task_definition.acceptance_checks) or "- (none)"
+    return (
+        f"Implement task {task_definition.task_id!r}: {task_definition.title}.\n\n"
+        f"Description:\n{task_definition.description}\n\n"
+        f"Acceptance checks:\n{acceptance}\n\n"
+        f"Verification step: {task_definition.verification_step}\n\n"
+        "Follow the TDD cycle. Write the source + test files at their "
+        "canonical paths under vfs:/, then write the summary to "
+        f"{_IMPLEMENTER_VFS_PATH}. Do not write secrets \u2014 the wrapper "
+        "blocks the run if a high-confidence credential pattern appears in "
+        "any added line."
+    )
+
+
+def _scan_files_for_secrets(
+    files: dict[str, str],
+    workdir: Path,
+) -> list[SecretFinding]:
+    """Scan a unified-diff between disk and the agent's emitted VFS files.
+
+    For each ``vfs:/<rel>`` entry, compute the diff vs. the existing
+    on-disk content (empty if the file is new). The scanner only flags
+    *added* lines, so unchanged content cannot trip the regex.
+    """
+    findings: list[SecretFinding] = []
+    for raw_path, new_content in files.items():
+        if not isinstance(raw_path, str) or not isinstance(new_content, str):
+            continue
+        if not raw_path.startswith("vfs:/"):
+            continue
+        rel = raw_path[len("vfs:/"):]
+        if rel.startswith(("findings/", "context/", "subagent/")):
+            continue
+        # Reject traversal *before* any filesystem read.
+        target: Path | None
+        try:
+            target = _safe_resolve(workdir, rel)
+        except PathTraversalError:
+            # The agent emitted a path that escapes the workdir.
+            # Treat it as if there's nothing on disk; persist_files
+            # will reject the same path and abort the write.
+            target = None
+        old_content = ""
+        if target is not None and target.is_file() and not target.is_symlink():
+            try:
+                with target.open("rb") as fh:
+                    raw = fh.read(_SCAN_READ_BYTES_CAP)
+                old_content = raw.decode("utf-8", errors="replace")
+            except OSError:
+                old_content = ""
+        diff = "\n".join(
+            difflib.unified_diff(
+                old_content.splitlines(),
+                new_content.splitlines(),
+                fromfile=f"a/{rel}",
+                tofile=f"b/{rel}",
+                lineterm="",
+            ),
+        )
+        findings.extend(scan_diff(diff))
+    return findings
+
+
+def _extract_verification_evidence(result: dict[str, Any]) -> list[str]:
+    """Read ``vfs:/context/implementer_output.json`` from the result.
+
+    Returns the ``verification_evidence`` list when present and shaped
+    correctly; an empty list otherwise. The summary file lives under
+    the read-only ``context/`` namespace so ``persist_files`` would
+    skip it — the wrapper consumes it in-memory instead.
+    """
+    files = result.get("files")
+    if not isinstance(files, dict):
+        return []
+    raw = files.get(_IMPLEMENTER_VFS_PATH)
+    if not isinstance(raw, str):
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, dict):
+        return []
+    evidence = parsed.get("verification_evidence", [])
+    if not isinstance(evidence, list):
+        return []
+    return [str(e) for e in evidence]
+
+
+def _run_via_deep_agent(
+    state: GraphState, llm: LLMProtocol,
+) -> dict[str, Any] | None:
+    """Deep Agent variant of ``task_node`` (T9).
+
+    Iterates plan tasks, dispatching each to the ``implementer`` agent.
+    For every task the wrapper:
+
+    1. Computes a real ``unified_diff`` between disk and the emitted
+       VFS files and runs the secret scanner on the added lines.
+    2. **Refuses to persist** any file when a HIGH-confidence secret
+       is found — the offending artifact never touches disk.
+    3. Otherwise, mirrors the VFS to the workdir and continues.
+
+    Returns ``None`` when a task produces no usable output, signalling
+    the caller to fall back to the legacy single-shot executor.
+    """
+    plan = state.implementation_plan
+    if plan is None or not plan.dag.tasks:
+        return {"tasks": []}
+
+    workdir = get_workdir(state)
+    completed: list[Task] = []
+    written_paths: list[Path] = []
+    aggregate_invocations: list[ToolInvocationRecord] = []
+    aggregate_messages: list[dict[str, object]] = []
+    aggregate_vfs_keys: set[str] = set()
+    seed_files = materialize_files(state)
+
+    def _build_trace() -> DeepAgentTrace:
+        return DeepAgentTrace(
+            role=AgentRole.IMPLEMENTER,
+            messages_digest=DeepAgentTrace.digest_messages(aggregate_messages),
+            vfs_keys=sorted(aggregate_vfs_keys),
+            tool_invocations=aggregate_invocations,
+        )
+
+    def _absorb(result: dict[str, Any], invocations: list[ToolInvocationRecord]) -> None:
+        aggregate_invocations.extend(invocations)
+        messages_obj = result.get("messages")
+        if isinstance(messages_obj, list):
+            aggregate_messages.extend(
+                m for m in messages_obj if isinstance(m, dict)
+            )
+        files_obj = result.get("files")
+        if isinstance(files_obj, dict):
+            aggregate_vfs_keys.update(
+                k for k in files_obj if isinstance(k, str)
+            )
+
+    for definition in plan.dag.tasks:
+        graph = build_deep_agent(
+            role=AgentRole.IMPLEMENTER,
+            llm=cast("BaseChatModel", llm),
+            workdir=workdir,
+        )
+        payload: dict[str, Any] = {
+            "messages": [
+                {"role": "user", "content": _build_task_prompt(definition)},
+            ],
+            "files": dict(seed_files),
+        }
+        invocations: list[ToolInvocationRecord] = []
+        result = run_deep_agent_bounded(
+            graph,
+            payload,
+            role=AgentRole.IMPLEMENTER,
+            node_name="task_node",
+            invocation_sink=invocations,
+        )
+
+        result_files = result.get("files") if isinstance(result, dict) else None
+        if not isinstance(result_files, dict) or not any(
+            isinstance(k, str)
+            and k.startswith("vfs:/")
+            and not k[len("vfs:/"):].startswith(
+                ("findings/", "context/", "subagent/"),
+            )
+            for k in result_files
+        ):
+            return None
+
+        # Pre-flight: scan the diff BEFORE persisting so a planted
+        # secret never touches disk.
+        findings = _scan_files_for_secrets(
+            {k: v for k, v in result_files.items() if isinstance(v, str)},
+            workdir,
+        )
+        if has_blocking_secret(findings):
+            offending = next(
+                f for f in findings if f.severity.value == "high"
+            )
+            blocked_task = Task(
+                task_id=definition.task_id,
+                definition=definition,
+                status=TaskStatus.BLOCKED,
+                artifacts=[],
+                verification_evidence=[],
+                error_message=(
+                    f"secret_scanner blocked run: {offending.pattern_name} "
+                    f"on line {offending.line}"
+                ),
+                idempotency_key=None,
+            )
+            completed.append(blocked_task)
+            _absorb(result, invocations)
+            # Commit prior successful tasks so partial progress is
+            # not orphaned in the workdir.
+            if written_paths:
+                _commit_artifacts(workdir, written_paths)
+            return {
+                "run_status": RunStatus.BLOCKED,
+                "tasks": completed,
+                "deep_agent_traces": {"task_node": _build_trace()},
+            }
+
+        artifacts = persist_files(result, workdir)
+        for artifact in artifacts:
+            target = (workdir / artifact.path).resolve()
+            written_paths.append(target)
+
+        evidence = _extract_verification_evidence(result)
+        completed.append(
+            Task(
+                task_id=definition.task_id,
+                definition=definition,
+                status=TaskStatus.SUCCEEDED,
+                artifacts=list(artifacts),
+                verification_evidence=evidence,
+                error_message=None,
+                idempotency_key=None,
+            ),
+        )
+        _absorb(result, invocations)
+
+    if written_paths:
+        _commit_artifacts(workdir, written_paths)
+
+    return {
+        "tasks": completed,
+        "deep_agent_traces": {"task_node": _build_trace()},
+    }

@@ -402,15 +402,15 @@ includes A/B parity, secret scanning on output, and an explicit
 human-review checkpoint on the demo run.
 
 **Acceptance criteria:**
-- [ ] `task_node` deep-agent variant invokes `implementer` with `refactorer` and `doc_writer` sub-agents.
-- [ ] After each task, `secret_scanner` runs on the diff; high-confidence finds block the run.
-- [ ] Tool budget enforced at 200 invocations; recursion 50; timeout 300s — overridable per spec §9.
-- [ ] A/B harness records both legacy and deep-agent outputs for the same input across 5 fixture tasks.
+- [x] `task_node` deep-agent variant invokes `implementer` with `refactorer` and `doc_writer` sub-agents.
+- [x] After each task, `secret_scanner` runs on the diff; high-confidence finds block the run.
+- [x] Tool budget enforced at 200 invocations; recursion 50; timeout 300s — overridable per spec §9.
+- [x] A/B harness records both legacy and deep-agent outputs for the same input across 5 fixture tasks.
 
 **Verification:**
-- [ ] `pytest tests/nodes/test_task_node_deep_agent.py`
-- [ ] `pytest tests/deep_agents/test_secret_scanner.py::test_blocks_planted_aws_key`
-- [ ] `pytest tests/contract/test_legacy_vs_deep.py::test_implementer_contract`
+- [x] `pytest tests/unit/test_node_task_deep_agent.py` *(11 tests, mirrors `tests/nodes/...` per repo layout)*
+- [x] `pytest tests/deep_agents/test_secret_scanner.py::TestScanDiffHighConfidence::test_blocks_planted_aws_key`
+- [x] `pytest tests/contract/test_legacy_vs_deep.py -k task_node` *(parametrised case in `TestGenerativeContract`)*
 
 **Dependencies:** T8
 

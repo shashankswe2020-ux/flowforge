@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
+
+from flowforge.deep_agents import AgentRole  # noqa: TC001  # runtime use by Pydantic
 
 # --- Enums ---
 
@@ -319,6 +323,51 @@ class RunMetadata(BaseModel):
     model_config_version: int = 1
 
 
+# --- Deep Agent Trace (spec §8.1) ---
+
+
+class Todo(BaseModel):
+    """A single ``write_todos`` planning entry."""
+
+    content: str
+    status: Literal["pending", "in_progress", "completed"] = "pending"
+
+
+class ToolInvocationRecord(BaseModel):
+    """Audit record for one Deep Agent tool call."""
+
+    tool: str
+    ok: bool
+    duration_ms: int = 0
+    parent: str | None = None
+    error: str | None = None
+
+
+class DeepAgentTrace(BaseModel):
+    """Per-node Deep Agent execution trace (spec §8.1)."""
+
+    role: AgentRole
+    todos: list[Todo] = Field(default_factory=list)
+    vfs_keys: list[str] = Field(default_factory=list)
+    messages_digest: str
+    duration_ms: int = 0
+    recursion_depth: int = 0
+    tool_invocations: list[ToolInvocationRecord] = Field(default_factory=list)
+
+    @staticmethod
+    def digest_messages(messages: list[dict[str, object]]) -> str:
+        """Return a deterministic sha256 over the canonical-JSON message list.
+
+        Canonicalisation: ``json.dumps`` with ``sort_keys=True`` and
+        compact separators, so dict-key ordering does not affect the
+        digest.
+        """
+        canonical = json.dumps(
+            messages, sort_keys=True, separators=(",", ":"), default=str,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 # --- Canonical Graph State ---
 
 
@@ -371,3 +420,6 @@ class GraphState(BaseModel):
 
     # Run metadata
     run_metadata: RunMetadata | None = None
+
+    # Deep Agent traces, keyed by LangGraph node name (spec §8.1)
+    deep_agent_traces: dict[str, DeepAgentTrace] = Field(default_factory=dict)

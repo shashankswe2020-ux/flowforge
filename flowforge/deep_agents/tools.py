@@ -145,23 +145,132 @@ def _telemetry[R](tool: str, body: Callable[[], R]) -> R:
 
 
 def _run_subprocess(argv: list[str], *, workdir: Path) -> CommandResult:
-    """Run ``argv`` with ``shell=False`` and capture stdout/stderr."""
+    """Run ``argv`` with ``shell=False``, a filtered env, and a wall-clock cap.
+
+    The child process inherits only an explicit allowlist of environment
+    variables (audit HIGH-1) so an agent-authored ``conftest.py`` /
+    ``ruff`` plugin / ``mypy`` plugin running inside the workdir cannot
+    read caller secrets such as ``OPENAI_API_KEY`` or
+    ``ANTHROPIC_API_KEY``. ``gh`` and ``git`` invocations additionally
+    receive credentials they need to function (``GH_TOKEN``,
+    ``SSH_AUTH_SOCK``, etc.).
+
+    A per-call ``timeout`` (audit HIGH-2) ensures a wedged child cannot
+    block the bounded agent run indefinitely. On timeout the child is
+    terminated and a ``CommandResult`` with returncode ``124`` is
+    returned so the caller (and LLM) sees a normal failure, not an
+    exception.
+    """
     started_at = time.monotonic()
-    completed = subprocess.run(  # noqa: S603 - argv is a list, shell=False
-        argv,
-        cwd=workdir,
-        shell=False,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    timeout_s = _resolve_subprocess_timeout()
+    child_env = _filter_subprocess_env(argv)
+    try:
+        completed = subprocess.run(  # noqa: S603 - argv is a list, shell=False
+            argv,
+            cwd=workdir,
+            shell=False,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=child_env,
+            timeout=timeout_s,
+        )
+        returncode = completed.returncode
+        stdout = completed.stdout
+        stderr = completed.stderr
+    except subprocess.TimeoutExpired as exc:
+        returncode = 124  # GNU timeout(1) convention
+        stdout = _coerce_stream(exc.stdout)
+        stderr = _coerce_stream(exc.stderr)
+        stderr = (
+            f"{stderr}\n[subprocess timed out after {timeout_s:g}s]"
+            if stderr
+            else f"[subprocess timed out after {timeout_s:g}s]"
+        )
     duration_ms = int((time.monotonic() - started_at) * 1000)
     return CommandResult(
-        returncode=completed.returncode,
-        stdout=completed.stdout,
-        stderr=completed.stderr,
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
         duration_ms=duration_ms,
     )
+
+
+# ---------------------------------------------------------------------------
+# Subprocess environment / timeout policy (audit HIGH-1, HIGH-2)
+# ---------------------------------------------------------------------------
+
+# Always-passthrough env keys: locale + path + tempdir + identity + Python hash.
+# Deliberately excludes anything *_TOKEN, *_KEY, *_SECRET, AWS_*, OPENAI_*,
+# ANTHROPIC_*, FLOWFORGE_* — agent-authored code running in the workdir
+# (e.g. an injected ``conftest.py``) must not see caller credentials.
+_BASE_ENV_KEYS: tuple[str, ...] = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "TMPDIR",
+    "PYTHONHASHSEED",
+)
+# Extra keys for ``git`` and ``gh`` so SSH-based auth still works.
+_GIT_ENV_KEYS: tuple[str, ...] = (
+    "SSH_AUTH_SOCK",
+    "SSH_AGENT_PID",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_TERMINAL_PROMPT",
+)
+# Extra keys for ``gh`` only — the GitHub CLI's own credential vars.
+_GH_ENV_KEYS: tuple[str, ...] = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_HOST",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+)
+
+_DEFAULT_SUBPROCESS_TIMEOUT_S: float = 600.0
+_SUBPROCESS_TIMEOUT_ENV_VAR: str = "FLOWFORGE_DEEP_AGENT_SUBPROCESS_TIMEOUT_S"
+
+
+def _filter_subprocess_env(argv: list[str]) -> dict[str, str]:
+    """Return the environment dict to pass to a subprocess child."""
+    program = argv[0] if argv else ""
+    allowed: list[str] = list(_BASE_ENV_KEYS)
+    if program in {"git", "gh"}:
+        allowed.extend(_GIT_ENV_KEYS)
+    if program == "gh":
+        allowed.extend(_GH_ENV_KEYS)
+    return {k: os.environ[k] for k in allowed if k in os.environ}
+
+
+def _resolve_subprocess_timeout() -> float:
+    raw = os.environ.get(_SUBPROCESS_TIMEOUT_ENV_VAR)
+    if raw is None:
+        return _DEFAULT_SUBPROCESS_TIMEOUT_S
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"{_SUBPROCESS_TIMEOUT_ENV_VAR} must be a positive number, got {raw!r}",
+        ) from exc
+    if value <= 0:
+        raise ValueError(
+            f"{_SUBPROCESS_TIMEOUT_ENV_VAR} must be a positive number, got {raw!r}",
+        )
+    return value
+
+
+def _coerce_stream(value: bytes | str | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
 
 
 # ---------------------------------------------------------------------------

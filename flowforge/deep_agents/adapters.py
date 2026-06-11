@@ -1,60 +1,208 @@
-"""GraphState ⇄ Deep Agent (messages + VFS) adapters.
+"""GraphState ⇄ Deep Agent (messages + VFS) adapters (T5).
 
-Lands in T5. T1 stub exposes the round-trip API surface (``state_to_input``,
-``apply_agent_result``) so ``factory.py`` and node wrappers can import
-typed entry points today.
+Implements the §5.4 / §8.1 contract. Three exported helpers:
 
-See spec §5.4 / §8.1 for the contract.
+* :func:`materialize_files` — build the VFS dict the Deep Agent is
+  invoked with: prior-context snapshots (spec, plan, findings) plus
+  every task artifact. Outputs use a ``vfs:/`` prefix to namespace
+  framework-managed entries from agent-authored ones.
+* :func:`persist_files` — mirror the post-invoke VFS to disk
+  (workdir-relative), with diff-aware writes and path-traversal
+  rejection. Read-only sentinel namespaces (``findings/``,
+  ``context/``, ``subagent/``) are skipped.
+* :func:`extract_findings` — parse canonical
+  ``vfs:/findings/*.json`` entries into
+  :class:`flowforge.state.models.Finding` instances.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import json
+from pathlib import Path
+from typing import TYPE_CHECKING, Final
+
+from flowforge.state.models import Finding, TaskArtifact
 
 if TYPE_CHECKING:
     from flowforge.state.models import GraphState
 
+__all__ = [
+    "PathTraversalError",
+    "extract_findings",
+    "materialize_files",
+    "persist_files",
+]
 
-def state_to_input(state: GraphState, *, seed_prompt: str) -> dict[str, Any]:
-    """Translate a ``GraphState`` into the Deep Agent ``invoke`` payload.
+_VFS_PREFIX: Final[str] = "vfs:/"
+_FINDINGS_PREFIX: Final[str] = "findings/"
+_CONTEXT_PREFIX: Final[str] = "context/"
+_SUBAGENT_PREFIX: Final[str] = "subagent/"
 
-    Args:
-        state: Current FlowForge graph state.
-        seed_prompt: Role-specific human seed message body.
+_SENTINEL_PREFIXES: Final[tuple[str, ...]] = (
+    _FINDINGS_PREFIX,
+    _CONTEXT_PREFIX,
+    _SUBAGENT_PREFIX,
+)
 
-    Returns:
-        A dict with at least ``messages`` and ``files`` keys ready for
-        ``CompiledStateGraph.invoke``.
+_FINDING_SOURCES: Final[tuple[tuple[str, str], ...]] = (
+    ("vfs:/context/findings/review.json", "review_findings"),
+    ("vfs:/context/findings/security.json", "security_findings"),
+    ("vfs:/context/findings/test.json", "test_findings"),
+)
+
+
+class PathTraversalError(ValueError):
+    """Raised when a VFS path resolves outside its workdir."""
+
+
+def _strip_vfs(path: str) -> str:
+    return path[len(_VFS_PREFIX):] if path.startswith(_VFS_PREFIX) else path
+
+
+def _is_sentinel(rel: str) -> bool:
+    return any(rel.startswith(prefix) for prefix in _SENTINEL_PREFIXES)
+
+
+def _safe_resolve(workdir: Path, rel: str) -> Path:
+    candidate = Path(rel)
+    if candidate.is_absolute():
+        raise PathTraversalError(f"absolute path not allowed: {rel}")
+    workdir_resolved = workdir.resolve()
+    target = (workdir_resolved / candidate).resolve()
+    try:
+        target.relative_to(workdir_resolved)
+    except ValueError as exc:
+        raise PathTraversalError(
+            f"path {rel!r} escapes workdir {workdir_resolved!s}",
+        ) from exc
+    return target
+
+
+def materialize_files(state: GraphState) -> dict[str, str]:
+    """Build the VFS dict to seed the Deep Agent with.
+
+    Layout:
+
+    * ``vfs:/<artifact.path>`` — content of every ``TaskArtifact`` on
+      ``state.tasks``.
+    * ``vfs:/context/spec.json`` — JSON dump of ``state.spec``.
+    * ``vfs:/context/plan.json`` — JSON dump of
+      ``state.implementation_plan``.
+    * ``vfs:/context/findings/{review,security,test}.json`` — JSON
+      arrays of prior findings (when non-empty).
 
     Raises:
-        NotImplementedError: T1 scaffold; implementation lands in T5.
+        PathTraversalError: If any artifact path is absolute or
+            contains ``..`` segments.
     """
+    files: dict[str, str] = {}
 
-    raise NotImplementedError("state_to_input lands in T5")
+    for task in state.tasks:
+        for artifact in task.artifacts:
+            rel = artifact.path
+            parts = Path(rel).parts
+            if Path(rel).is_absolute() or ".." in parts:
+                raise PathTraversalError(
+                    f"artifact path {rel!r} on task {task.task_id!r} "
+                    "must be relative without '..' segments",
+                )
+            files[f"{_VFS_PREFIX}{rel}"] = artifact.content
+
+    if state.spec is not None:
+        files["vfs:/context/spec.json"] = state.spec.model_dump_json()
+
+    if state.implementation_plan is not None:
+        files["vfs:/context/plan.json"] = (
+            state.implementation_plan.model_dump_json()
+        )
+
+    for vfs_path, attr in _FINDING_SOURCES:
+        findings: list[Finding] = getattr(state, attr)
+        if findings:
+            files[vfs_path] = json.dumps(
+                [f.model_dump(mode="json") for f in findings],
+            )
+
+    return files
 
 
-def apply_agent_result(
-    state: GraphState,
-    result: dict[str, Any],
-    *,
-    node_name: str,
-) -> dict[str, Any]:
-    """Merge a Deep Agent result back into a ``GraphState`` delta.
+def persist_files(
+    result: dict[str, object],
+    workdir: Path,
+) -> list[TaskArtifact]:
+    """Mirror the agent's VFS to ``workdir`` with diff-aware writes.
 
-    Args:
-        state: Pre-call graph state (used to resolve ``workdir`` etc.).
-        result: Raw output of ``agent.invoke``.
-        node_name: Name of the calling LangGraph node — used as the
-            ``deep_agent_traces`` key (spec §8.1).
-
-    Returns:
-        A LangGraph-compatible state-delta dict.
+    Returns the list of ``TaskArtifact`` records for paths whose on-disk
+    content was created or changed. Sentinel namespaces (``findings/``,
+    ``context/``, ``subagent/``) are read-only and skipped.
 
     Raises:
-        NotImplementedError: T1 scaffold; implementation lands in T5.
+        PathTraversalError: If a path is absolute or escapes ``workdir``.
     """
+    files = result.get("files") if isinstance(result, dict) else None
+    if not isinstance(files, dict):
+        return []
 
-    raise NotImplementedError("apply_agent_result lands in T5")
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    artifacts: list[TaskArtifact] = []
+    for raw_path, content in files.items():
+        if not isinstance(raw_path, str) or not isinstance(content, str):
+            continue
+        rel = _strip_vfs(raw_path)
+        if _is_sentinel(rel):
+            continue
+
+        target = _safe_resolve(workdir, rel)
+        if target.exists() and target.read_text(encoding="utf-8") == content:
+            continue
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        artifacts.append(
+            TaskArtifact(
+                artifact_id=rel,
+                artifact_type="file",
+                path=rel,
+                fingerprint=str(len(content)),
+                content=content,
+            ),
+        )
+    return artifacts
 
 
-__all__ = ["apply_agent_result", "state_to_input"]
+def extract_findings(result: dict[str, object]) -> list[Finding]:
+    """Parse ``vfs:/findings/*.json`` entries into :class:`Finding`.
+
+    Each entry must be a JSON array of Finding-shaped dicts. Files
+    outside the ``findings/`` prefix are ignored.
+
+    Raises:
+        ValueError: If a findings file is not valid JSON or not a list.
+    """
+    files = result.get("files") if isinstance(result, dict) else None
+    if not isinstance(files, dict):
+        return []
+
+    findings: list[Finding] = []
+    for raw_path in sorted(files):
+        if not isinstance(raw_path, str):
+            continue
+        rel = _strip_vfs(raw_path)
+        if not rel.startswith(_FINDINGS_PREFIX):
+            continue
+        body = files[raw_path]
+        if not isinstance(body, str):
+            continue
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"invalid JSON in findings file {raw_path!r}: {exc}",
+            ) from exc
+        if not isinstance(payload, list):
+            raise ValueError(
+                f"findings file {raw_path!r} must contain a JSON array",
+            )
+        findings.extend(Finding.model_validate(item) for item in payload)
+    return findings

@@ -19,7 +19,12 @@ timeouts and tool budgets land in T10.
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
+from contextvars import ContextVar, copy_context
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, TypedDict, cast
 
@@ -31,16 +36,26 @@ from langchain_core.language_models import BaseChatModel  # noqa: TC002 — runt
 from langchain_core.runnables import RunnableConfig  # noqa: TC002 — runtime hints
 from langchain_core.tools import tool as _lc_tool
 from langchain_core.tools.base import BaseTool
+from langgraph.errors import GraphRecursionError
 from langgraph.graph.state import CompiledStateGraph  # noqa: TC002 — runtime hints
 
 from flowforge.deep_agents import AgentRole
 from flowforge.deep_agents import tools as _ftools
+from flowforge.deep_agents.errors import (
+    AgentTimeoutError,
+    RecursionLimitExceededError,
+    ToolBudgetExceededError,
+)
 from flowforge.deep_agents.subagents import subagents_for
+from flowforge.state.models import DeepAgentTrace, ToolInvocationRecord
 
 __all__ = [
     "DEFAULT_RECURSION_LIMIT",
+    "DEFAULT_TIMEOUT_S",
+    "DEFAULT_TOOL_BUDGET",
     "ROLE_TOOL_ALLOWLIST",
     "build_deep_agent",
+    "run_deep_agent_bounded",
     "tools_for_role",
 ]
 
@@ -51,12 +66,189 @@ __all__ = [
 DEFAULT_RECURSION_LIMIT: Final[int] = 50
 """Spec §10 default. Overridable via ``FLOWFORGE_DEEP_AGENT_RECURSION``."""
 
+DEFAULT_TIMEOUT_S: Final[int] = 300
+"""Spec §10 wall-clock default (seconds). Overridable via
+``FLOWFORGE_DEEP_AGENT_TIMEOUT_S``."""
+
+DEFAULT_TOOL_BUDGET: Final[int] = 200
+"""Spec §10 per-node tool budget. Overridable via
+``FLOWFORGE_DEEP_AGENT_TOOL_BUDGET``."""
+
 _RECURSION_ENV_VAR: Final[str] = "FLOWFORGE_DEEP_AGENT_RECURSION"
+_TIMEOUT_ENV_VAR: Final[str] = "FLOWFORGE_DEEP_AGENT_TIMEOUT_S"
+_TOOL_BUDGET_ENV_VAR: Final[str] = "FLOWFORGE_DEEP_AGENT_TOOL_BUDGET"
 
 _INSTRUCTIONS_DIR: Path = (
     Path(__file__).resolve().parent / "instructions"
 )
 """Module-level so tests can monkeypatch it cleanly."""
+
+
+# ---------------------------------------------------------------------------
+# Bounded execution — recursion / timeout / tool-budget (spec §10.6, T10)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _RunBudget:
+    """Per-invocation budget tracker for one Deep Agent run."""
+
+    role: AgentRole
+    node_name: str
+    deadline: float  # ``time.monotonic`` deadline
+    remaining_calls: int
+    invocations: list[ToolInvocationRecord] = field(default_factory=list)
+
+
+_BUDGET_VAR: ContextVar[_RunBudget | None] = ContextVar(
+    "flowforge_deep_agent_budget", default=None,
+)
+
+
+def _partial_trace(budget: _RunBudget) -> DeepAgentTrace:
+    return DeepAgentTrace(
+        role=budget.role,
+        messages_digest=DeepAgentTrace.digest_messages([]),
+        tool_invocations=list(budget.invocations),
+    )
+
+
+def _consume_tool_budget(tool_name: str) -> None:
+    """Charge one tool invocation against the active run budget.
+
+    No-op when called outside a :func:`run_deep_agent_bounded` context
+    so individual tools remain unit-testable.
+
+    Raises:
+        AgentTimeoutError: If the wall-clock deadline has passed.
+        ToolBudgetExceededError: If the per-node tool budget is
+            exhausted.
+    """
+    budget = _BUDGET_VAR.get()
+    if budget is None:
+        return
+    if time.monotonic() > budget.deadline:
+        raise AgentTimeoutError(
+            f"deep agent run for {budget.node_name!r} exceeded wall-clock deadline",
+            role=budget.role,
+            node_name=budget.node_name,
+            partial_trace=_partial_trace(budget),
+        )
+    if budget.remaining_calls <= 0:
+        raise ToolBudgetExceededError(
+            f"deep agent run for {budget.node_name!r} exhausted tool budget",
+            role=budget.role,
+            node_name=budget.node_name,
+            partial_trace=_partial_trace(budget),
+        )
+    budget.remaining_calls -= 1
+    budget.invocations.append(ToolInvocationRecord(tool=tool_name, ok=True))
+
+
+def _resolve_positive_int(env_var: str, default: int) -> int:
+    raw = os.environ.get(env_var)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"{env_var} must be a positive integer, got {raw!r}",
+        ) from exc
+    if value <= 0:
+        raise ValueError(
+            f"{env_var} must be a positive integer, got {value}",
+        )
+    return value
+
+
+def _resolve_timeout_s() -> int:
+    return _resolve_positive_int(_TIMEOUT_ENV_VAR, DEFAULT_TIMEOUT_S)
+
+
+def _resolve_tool_budget() -> int:
+    return _resolve_positive_int(_TOOL_BUDGET_ENV_VAR, DEFAULT_TOOL_BUDGET)
+
+
+def run_deep_agent_bounded(
+    graph: CompiledStateGraph,  # type: ignore[type-arg]
+    payload: dict[str, object],
+    *,
+    role: AgentRole,
+    node_name: str,
+    timeout_s: float | None = None,
+    tool_budget: int | None = None,
+) -> dict[str, object]:
+    """Invoke ``graph`` with wall-clock + tool-budget caps.
+
+    Args:
+        graph: A compiled Deep Agent graph (see :func:`build_deep_agent`).
+        payload: ``invoke`` input dict.
+        role: The agentic-node role (used to label errors and traces).
+        node_name: LangGraph node name (used as trace key).
+        timeout_s: Wall-clock seconds; defaults to
+            :func:`_resolve_timeout_s`.
+        tool_budget: Max tool invocations; defaults to
+            :func:`_resolve_tool_budget`.
+
+    Returns:
+        The raw ``graph.invoke`` result.
+
+    Raises:
+        AgentTimeoutError: Wall-clock deadline elapsed.
+        RecursionLimitExceededError: LangGraph signalled a recursion
+            limit (typically translated from
+            :class:`langgraph.errors.GraphRecursionError`).
+        ToolBudgetExceededError: Tool-invocation budget exhausted.
+    """
+    resolved_timeout = (
+        float(timeout_s) if timeout_s is not None else float(_resolve_timeout_s())
+    )
+    resolved_budget = (
+        tool_budget if tool_budget is not None else _resolve_tool_budget()
+    )
+    budget = _RunBudget(
+        role=role,
+        node_name=node_name,
+        deadline=time.monotonic() + resolved_timeout,
+        remaining_calls=resolved_budget,
+    )
+    token = _BUDGET_VAR.set(budget)
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        ctx = copy_context()
+        future = executor.submit(lambda: ctx.run(graph.invoke, payload))
+        try:
+            result = future.result(timeout=resolved_timeout)
+        except FuturesTimeoutError as exc:
+            raise AgentTimeoutError(
+                f"deep agent run for {node_name!r} timed out after "
+                f"{resolved_timeout:g}s",
+                role=role,
+                node_name=node_name,
+                partial_trace=_partial_trace(budget),
+            ) from exc
+        except GraphRecursionError as exc:
+            raise RecursionLimitExceededError(
+                f"deep agent run for {node_name!r} hit recursion limit",
+                role=role,
+                node_name=node_name,
+                partial_trace=_partial_trace(budget),
+            ) from exc
+        if not isinstance(result, dict):
+            raise TypeError(
+                f"graph.invoke must return a dict (got {type(result).__name__})",
+            )
+        return result
+    finally:
+        # Audit HIGH-2: never block the caller on a wedged worker.
+        # ``cancel_futures=True`` cancels not-yet-started futures; an
+        # already-running future cannot be cancelled (CPython does not
+        # support thread cancellation), but ``wait=False`` ensures the
+        # caller is freed regardless. The orphan thread is bounded by
+        # the per-subprocess timeout enforced inside ``_run_subprocess``.
+        executor.shutdown(wait=False, cancel_futures=True)
+        _BUDGET_VAR.reset(token)
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +293,7 @@ def _wrap_run_tests(workdir: Path) -> BaseTool:
         Args:
             path: Optional path relative to the workdir to scope the run.
         """
+        _consume_tool_budget("run_tests")
         return _ftools.run_tests(workdir=workdir, path=path).model_dump_json()
 
     return run_tests
@@ -110,6 +303,7 @@ def _wrap_run_lint(workdir: Path) -> BaseTool:
     @_lc_tool
     def run_lint() -> str:
         """Run ``ruff check .`` inside the workdir and return the result JSON."""
+        _consume_tool_budget("run_lint")
         return _ftools.run_lint(workdir=workdir).model_dump_json()
 
     return run_lint
@@ -119,6 +313,7 @@ def _wrap_run_typecheck(workdir: Path) -> BaseTool:
     @_lc_tool
     def run_typecheck() -> str:
         """Run ``mypy .`` inside the workdir and return the result JSON."""
+        _consume_tool_budget("run_typecheck")
         return _ftools.run_typecheck(workdir=workdir).model_dump_json()
 
     return run_typecheck
@@ -128,6 +323,7 @@ def _wrap_git_status(workdir: Path) -> BaseTool:
     @_lc_tool
     def git_status() -> str:
         """Return ``git status --porcelain`` for the workdir (read-only)."""
+        _consume_tool_budget("git_status")
         return _ftools.git_status(workdir=workdir).model_dump_json()
 
     return git_status
@@ -141,6 +337,7 @@ def _wrap_git_diff(workdir: Path) -> BaseTool:
         Args:
             rev: Git revision to diff against (defaults to ``HEAD``).
         """
+        _consume_tool_budget("git_diff")
         return _ftools.git_diff(workdir=workdir, rev=rev).model_dump_json()
 
     return git_diff
@@ -160,6 +357,7 @@ def _wrap_gh_issue_create(workdir: Path) -> BaseTool:
             body: Issue body markdown.
             labels: Optional list of labels to attach.
         """
+        _consume_tool_budget("gh_issue_create")
         return _ftools.gh_issue_create(
             workdir=workdir,
             title=title,
@@ -184,6 +382,7 @@ def _wrap_gh_label_ensure(workdir: Path) -> BaseTool:
             color: 6-character hex color (without ``#``).
             description: Optional human-readable description.
         """
+        _consume_tool_budget("gh_label_ensure")
         return _ftools.gh_label_ensure(
             workdir=workdir,
             name=name,
@@ -206,6 +405,7 @@ def _wrap_web_search(workdir: Path) -> BaseTool:
             query: Free-text search query.
             max_results: Maximum number of results to return (1–25).
         """
+        _consume_tool_budget("web_search")
         return _ftools.web_search(
             query=query, max_results=max_results,
         ).model_dump_json()
@@ -224,6 +424,7 @@ def _wrap_mcp_invoke(workdir: Path) -> BaseTool:
             tool: MCP tool identifier.
             arguments: Tool-specific arguments dict.
         """
+        _consume_tool_budget("mcp_invoke")
         return _ftools.mcp_invoke(
             tool=tool, arguments=arguments,
         ).model_dump_json()

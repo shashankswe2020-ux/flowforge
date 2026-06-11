@@ -93,7 +93,21 @@ def cli() -> None:
          "server still starts (required for graph execution); only the "
          "Studio URL is suppressed.",
 )
-def run(prompt: str, repo: str | None, skip_github: bool, no_studio: bool) -> None:
+@click.option(
+    "--use-deep-agents/--no-deep-agents",
+    "deep_agents",
+    default=None,
+    help="Enable (or disable) the Deep Agents execution path for agentic "
+         "nodes. Overrides the FLOWFORGE_DEEP_AGENTS env var and the "
+         "persisted ~/.flowforge/config.json setting for this run only.",
+)
+def run(
+    prompt: str,
+    repo: str | None,
+    skip_github: bool,
+    no_studio: bool,
+    deep_agents: bool | None,
+) -> None:
     """Generate code from a prompt.
 
     Runs the full pipeline: clarify → spec → plan → fan-out tasks →
@@ -119,6 +133,16 @@ def run(prompt: str, repo: str | None, skip_github: bool, no_studio: bool) -> No
         click.echo("⚠️  FlowForge not configured yet. Running setup first...\n")
         _do_setup()
         click.echo()
+
+    # Surface the per-run flag to the langgraph dev subprocess via env var
+    # so build_live_graph() can pick it up. Resolution priority:
+    # CLI > env > config > default (False) — see flowforge.config.deep_agents.
+    if deep_agents is not None:
+        import os as _os
+
+        from flowforge.config.deep_agents import DEEP_AGENTS_ENV_VAR
+
+        _os.environ[DEEP_AGENTS_ENV_VAR] = "1" if deep_agents else "0"
 
     _run_pipeline(prompt, repo=repo, skip_github=skip_github, no_studio=no_studio)
 

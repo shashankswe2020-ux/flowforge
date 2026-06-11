@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+import tempfile
+from dataclasses import asdict, dataclass
 from pathlib import Path
-
 
 CONFIG_DIR = Path.home() / ".flowforge"
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -26,13 +26,27 @@ class FlowForgeConfig:
     max_tokens: int = 4096
     default_private: bool = True
     langgraph_port: int = 8123
+    deep_agents: bool = False
 
     def save(self) -> None:
-        """Persist config to disk."""
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
-        # Secure the config file
-        os.chmod(CONFIG_FILE, 0o600)
+        """Persist config atomically with mode 0o600 from creation.
+
+        Audit MEDIUM-1: ``Path.write_text`` followed by ``os.chmod``
+        leaves a TOCTOU window where the file is briefly readable by
+        other users. ``tempfile.mkstemp`` creates with ``0o600``
+        directly, and ``os.replace`` is atomic and preserves the source
+        permissions, eliminating the window.
+        """
+        parent = CONFIG_FILE.parent
+        parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(prefix=".config.", suffix=".tmp", dir=parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(asdict(self), fh, indent=2)
+            os.replace(tmp_path, CONFIG_FILE)
+        except BaseException:
+            Path(tmp_path).unlink(missing_ok=True)
+            raise
 
     @classmethod
     def load(cls) -> FlowForgeConfig:

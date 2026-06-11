@@ -226,4 +226,23 @@ def build_live_graph() -> CompiledStateGraph:  # type: ignore[type-arg]
         def invoke(self, prompt: str) -> Any:
             return self._inner.invoke(prompt)
 
-    return build_real_graph(_LLMWrapper(llm))
+    from flowforge.config.deep_agents import resolve_deep_agents_enabled
+
+    wrapped = _LLMWrapper(llm)
+    if resolve_deep_agents_enabled():
+        return build_deep_agent_graph(wrapped)
+    return build_real_graph(wrapped)
+
+
+def build_deep_agent_graph(llm: Any) -> CompiledStateGraph:  # type: ignore[type-arg]  # noqa: ANN401
+    """Build the Deep Agents variant of the FlowForge pipeline.
+
+    During Phase 0 of the Deep Agents enhancement (T11) no agentic
+    node has a Deep Agent variant yet (those land in T7–T9). This
+    function therefore returns the same graph as
+    :func:`build_real_graph`. As wrappers come online, individual
+    nodes will switch on the
+    :envvar:`FLOWFORGE_DEEP_AGENTS` flag internally and consume their
+    role-bound Deep Agent.
+    """
+    return build_real_graph(llm)

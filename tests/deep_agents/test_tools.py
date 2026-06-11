@@ -318,3 +318,107 @@ class TestTelemetry:
         assert "tool.invoked" in events
         assert "tool.failed" in events
         assert "tool.succeeded" not in events
+
+
+# ---------------------------------------------------------------------------
+# Subprocess hardening: env whitelist + per-call timeout (audit HIGH-1, HIGH-2)
+# ---------------------------------------------------------------------------
+
+
+class TestRunSubprocessEnvWhitelist:
+    """``_run_subprocess`` must not pass the parent's full env to children.
+
+    Agent-authored ``conftest.py`` / plugins running inside the workdir
+    can otherwise read ``OPENAI_API_KEY`` etc. from the inherited env.
+    """
+
+    def test_strips_secret_env_vars(
+        self,
+        workdir: Path,
+        patch_run: list[dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "ak-secret")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-secret")
+        monkeypatch.setenv("PATH", "/usr/bin")
+
+        run_tests(workdir=workdir)
+
+        env = patch_run[-1].get("env")
+        assert env is not None, "_run_subprocess must pass an explicit env="
+        assert "OPENAI_API_KEY" not in env
+        assert "ANTHROPIC_API_KEY" not in env
+        assert "AWS_SECRET_ACCESS_KEY" not in env
+        assert env.get("PATH") == "/usr/bin"
+
+    def test_non_gh_non_git_tool_drops_tokens(
+        self,
+        workdir: Path,
+        patch_run: list[dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("GH_TOKEN", "gh-tok")
+        monkeypatch.setenv("GITHUB_TOKEN", "gh-pat")
+        monkeypatch.setenv("PATH", "/usr/bin")
+
+        run_tests(workdir=workdir)
+
+        env = patch_run[-1].get("env")
+        assert env is not None
+        assert "GH_TOKEN" not in env
+        assert "GITHUB_TOKEN" not in env
+        assert env.get("PATH") == "/usr/bin"
+
+    def test_passes_per_call_timeout(
+        self,
+        workdir: Path,
+        patch_run: list[dict[str, Any]],
+    ) -> None:
+        run_tests(workdir=workdir)
+        timeout = patch_run[-1].get("timeout")
+        assert timeout is not None, "_run_subprocess must pass timeout="
+        assert isinstance(timeout, (int, float))
+        assert timeout > 0
+
+
+class TestRunSubprocessTimeoutExpired:
+    """A wedged subprocess must surface as a non-zero ``CommandResult``."""
+
+    def test_timeout_returns_non_zero(
+        self,
+        workdir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def timing_out_run(
+            argv: Sequence[str],
+            **kwargs: Any,  # noqa: ANN401
+        ) -> _FakeCompleted:
+            raise subprocess.TimeoutExpired(cmd=list(argv), timeout=kwargs.get("timeout", 1))
+
+        monkeypatch.setattr(tools.subprocess, "run", timing_out_run)
+        result = run_tests(workdir=workdir)
+        assert result.returncode != 0
+        assert "timed out" in result.stderr.lower()
+
+
+class TestGhInheritsToken:
+    """Verify GH_TOKEN survives the env filter for ``gh`` argv only."""
+
+    def test_gh_label_ensure_passes_token(
+        self,
+        workdir: Path,
+        patch_run: list[dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("GH_TOKEN", "gh-tok-value")
+        from flowforge.deep_agents.tools import gh_label_ensure
+
+        gh_label_ensure(workdir=workdir, name="bug", color="ff0000")
+
+        # Find the call whose argv starts with "gh"
+        gh_calls = [c for c in patch_run if c["argv"] and c["argv"][0] == "gh"]
+        assert gh_calls, "expected a `gh` subprocess call"
+        env = gh_calls[-1].get("env")
+        assert env is not None
+        assert env.get("GH_TOKEN") == "gh-tok-value"

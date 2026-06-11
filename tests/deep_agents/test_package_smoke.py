@@ -78,20 +78,20 @@ def test_instructions_stub_exists_per_role() -> None:
 
 
 def test_stubs_raise_not_implemented() -> None:
-    """T1 stubs must raise ``NotImplementedError`` (sentinel for unimplemented)."""
-    from flowforge.deep_agents import adapters, factory, tools
+    """T1 stubs must raise ``NotImplementedError`` (sentinel for unimplemented).
+
+    Implemented modules are no longer covered here:
+
+    * T2 — :mod:`flowforge.deep_agents.tools` (see ``test_tools.py``).
+    * T4 — :func:`flowforge.deep_agents.factory.build_deep_agent`
+      (see ``test_factory.py``).
+    """
+    from flowforge.deep_agents import adapters, tools
 
     # T2 implements ``_safe_path`` — escape attempts must raise
     # ``PathTraversalError`` (the canonical sentinel for unsafe paths).
     with pytest.raises(tools.PathTraversalError):
         tools._safe_path(Path("/tmp"), "/etc/passwd")
-
-    with pytest.raises(NotImplementedError):
-        factory.build_deep_agent(
-            role=AgentRole.CLARIFIER,
-            llm=None,  # type: ignore[arg-type]
-            workdir=Path("/tmp"),
-        )
 
     with pytest.raises(NotImplementedError):
         adapters.state_to_input(None, seed_prompt="x")  # type: ignore[arg-type]

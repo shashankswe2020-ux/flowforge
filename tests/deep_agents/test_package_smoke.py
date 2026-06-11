@@ -84,8 +84,10 @@ def test_stubs_raise_not_implemented() -> None:
     with pytest.raises(NotImplementedError):
         subagents.get_subagents_for_role(AgentRole.CLARIFIER)
 
-    with pytest.raises(NotImplementedError):
-        tools._safe_path(Path("/tmp"), "x")
+    # T2 implements ``_safe_path`` — escape attempts must raise
+    # ``PathTraversalError`` (the canonical sentinel for unsafe paths).
+    with pytest.raises(tools.PathTraversalError):
+        tools._safe_path(Path("/tmp"), "/etc/passwd")
 
     with pytest.raises(NotImplementedError):
         factory.build_deep_agent(

@@ -386,9 +386,9 @@ sub-agents into the rotation.
 
 ### Checkpoint C — Phase 2 complete
 
-- [ ] 7 of 8 agentic nodes have deep-agent variants. `task_node` still legacy-only.
-- [ ] Demo run with `--use-deep-agents` reaches `quality_gate_merge` successfully.
-- [ ] `code-reviewer` re-review focusing on the new wrappers.
+- [x] 7 of 8 agentic nodes have deep-agent variants. `task_node` still legacy-only. (Verified: `clarification`, `spec`, `plan`, `issue_orchestrator`, `code_review`, `security_audit`, `test_engineer` all branch on `resolve_deep_agents_enabled()`; `task_node` deferred to T9.)
+- [ ] Demo run with `--use-deep-agents` reaches `quality_gate_merge` successfully. (Offline check: `FLOWFORGE_DEEP_AGENTS=1 build_deep_agent_graph(...)` compiles and includes `quality_gate_merge`/`ship_node`. Live run with real credentials remains a manual smoke test — `swe-forge run "<prompt>" --use-deep-agents --skip-github`.)
+- [x] `code-reviewer` re-review focusing on the new wrappers. (See [docs/reviews/code-review-checkpoint-22.md](../reviews/code-review-checkpoint-22.md) — Approve-with-minor; all 3 Important findings resolved before merge.)
 
 ---
 

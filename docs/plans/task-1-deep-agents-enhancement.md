@@ -367,14 +367,14 @@ generative nodes. Adds `researcher`, `estimator`, `dedupe_helper`
 sub-agents into the rotation.
 
 **Acceptance criteria:**
-- [ ] Four nodes have deep-agent variants behind the flag.
-- [ ] Per-role instructions in `instructions/{clarifier,spec_author,planner,triager}.md` filled in.
-- [ ] Each writes its `DeepAgentTrace` and persists VFS to workdir.
-- [ ] Sub-agent invocations recorded in `trace.tool_invocations` with parent → child linkage.
+- [x] Four nodes have deep-agent variants behind the flag.
+- [x] Per-role instructions in `instructions/{clarifier,spec_author,planner,triager}.md` filled in.
+- [x] Each writes its `DeepAgentTrace` and persists VFS to workdir.
+- [x] Sub-agent invocations recorded in `trace.tool_invocations` with parent → child linkage.
 
 **Verification:**
-- [ ] `pytest tests/nodes/test_clarification_deep_agent.py tests/nodes/test_spec_deep_agent.py tests/nodes/test_plan_deep_agent.py tests/nodes/test_issue_orchestrator_deep_agent.py`
-- [ ] `pytest tests/contract/test_legacy_vs_deep.py` (4 new cases now active)
+- [x] `pytest tests/unit/test_node_clarification_deep_agent.py tests/unit/test_node_spec_deep_agent.py tests/unit/test_node_plan_deep_agent.py tests/unit/test_node_issue_orchestrator_deep_agent.py` (25 tests passing)
+- [x] `pytest tests/contract/test_legacy_vs_deep.py` (4 new generative cases × 4 tests = 16 contract checks active; 32 cases total)
 
 **Dependencies:** T7 (proves the wrapper pattern), T12
 

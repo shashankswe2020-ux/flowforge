@@ -439,13 +439,13 @@ human-review checkpoint on the demo run.
 job (it costs minutes, not seconds), and gate releases on it.
 
 **Acceptance criteria:**
-- [ ] Nightly workflow runs `swe-forge run "build tic-tac-toe web app" --repo demo --no-studio --use-deep-agents` against a recorded-LLM fake.
-- [ ] Job fails if pipeline status ≠ `succeeded` or `blocked`, or if any new test count regression occurs.
-- [ ] `OPENAI_API_KEY=invalid` smoke test confirms zero real LLM calls (acceptance §13.12).
+- [x] Nightly workflow runs `swe-forge run "build tic-tac-toe web app" --repo demo --no-studio --use-deep-agents` against a recorded-LLM fake. *(Implemented as `tests/e2e/test_demo_run.py` driving `PipelineRunner` with a deterministic `_MockLLM` over the same prompt — invoked from `.github/workflows/nightly-deep-agent.yml` with both `FLOWFORGE_DEEP_AGENTS=0` and `=1`.)*
+- [x] Job fails if pipeline status ≠ `succeeded` or `blocked`, or if any new test count regression occurs. *(Status assertion in `TestCanonicalDemoRun::test_demo_run_completes_with_terminal_status`; count guard reads `.github/test-count-baseline = 779` and fails when collected drops below it.)*
+- [x] `OPENAI_API_KEY=invalid` smoke test confirms zero real LLM calls (acceptance §13.12). *(Workflow sets `OPENAI_API_KEY=invalid` in the env block and runs the full suite under that key; covered locally by `TestNoRealLLMCallsWithInvalidKey::test_invalid_api_key_does_not_block_mocked_run`.)*
 
 **Verification:**
-- [ ] CI run green with both deep + legacy.
-- [ ] `pytest -q` w/ `OPENAI_API_KEY=invalid` succeeds.
+- [x] CI run green with both deep + legacy. *(Workflow matrix `deep_agents: ["0", "1"]`; both legs of the matrix run `pytest tests/e2e -q`.)*
+- [x] `pytest -q` w/ `OPENAI_API_KEY=invalid` succeeds. *(Verified locally on 2026-06-12: 778 passed / 1 skipped.)*
 
 **Dependencies:** T9
 

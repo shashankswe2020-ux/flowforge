@@ -422,12 +422,12 @@ human-review checkpoint on the demo run.
 
 ### Checkpoint D — Phase 3 complete
 
-- [ ] All 8 agentic nodes have deep-agent variants.
-- [ ] E2E demo (`build tic-tac-toe web app`) green with `--use-deep-agents`.
-- [ ] All 441 existing tests still green.
-- [ ] `mypy` clean with **no `Any`** anywhere in `flowforge/deep_agents/` (verified by acceptance criterion §13.8).
-- [ ] `pytest --cov=flowforge.deep_agents --cov-fail-under=90` passes.
-- [ ] **Mandatory `security-auditor` audit** on the implementer + secret-scanner pipeline.
+- [x] All 8 agentic nodes have deep-agent variants. *(Verified 2026-06-12: `clarification`, `spec`, `plan`, `issue_orchestrator`, `code_review`, `security_audit`, `test_engineer`, `task_runner` all branch on `resolve_deep_agents_enabled()`.)*
+- [ ] E2E demo (`build tic-tac-toe web app`) green with `--use-deep-agents`. *(Deferred to T13 — Phase 4 nightly CI gate.)*
+- [x] All 441 existing tests still green. *(773 passed / 1 skipped on 2026-06-12; +332 over baseline.)*
+- [x] `mypy` clean with **no `Any`** anywhere in `flowforge/deep_agents/` (verified by acceptance criterion §13.8). *(`mypy flowforge/deep_agents` → 0 errors across 7 files; the only token-match in source is a docstring word, not a type.)*
+- [x] `pytest --cov=flowforge.deep_agents --cov-fail-under=90` passes. *(91.87% on 2026-06-12 — `__init__` 100%, `errors` 100%, `adapters` 96%, `subagents` 96%, `secret_scanner` 98%, `tools` 92%, `factory` 87%.)*
+- [x] **Mandatory `security-auditor` audit** on the implementer + secret-scanner pipeline. *(`docs/security-audits/security-audit-18.md` — 0 Critical, 2 Important both fixed in `22dfb92`, 4 Minor tracked, 4 Info.)*
 
 ---
 

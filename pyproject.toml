@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swe-forge"
-version = "0.1.84"
+version = "0.1.90"
 description = "Multi-agent LangGraph framework for autonomous software development"
 requires-python = ">=3.12"
 license = "MIT"

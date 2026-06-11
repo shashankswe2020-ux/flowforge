@@ -88,8 +88,12 @@ class TestCreateRepo:
         )
         url = create_repo("owner/repo", private=True)
         assert url == "https://github.com/owner/repo"
-        call_args = mock_run.call_args[0][0]
-        assert "--private" in call_args
+        # create_repo invokes _run twice: `gh repo create ... --private`
+        # and then `gh repo view ... --json url`. Assert the create call
+        # carried the --private flag.
+        argv_history = [call.args[0] for call in mock_run.call_args_list]
+        create_argv = next(a for a in argv_history if a[:3] == ["gh", "repo", "create"])
+        assert "--private" in create_argv
 
 
 class TestGetRepoUrl:

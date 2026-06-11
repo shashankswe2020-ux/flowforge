@@ -160,7 +160,7 @@ class TestDeepAgentDispatch:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         called: dict[str, bool] = {"build": False}
 
         def boom(*_a: object, **_k: object) -> None:

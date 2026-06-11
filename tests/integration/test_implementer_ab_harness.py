@@ -180,7 +180,7 @@ class TestImplementerABHarness:
     def test_legacy_path_produces_artifact(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixture: FixtureTask,
     ) -> None:
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         monkeypatch.setattr(task_runner, "_commit_artifacts", lambda *a, **k: None)
         state = _state_for(tmp_path / "legacy", fixture)
         llm = MockLLM(responses=[_legacy_response(fixture)])
@@ -214,7 +214,7 @@ class TestImplementerABHarness:
         if fixture.expects_block:
             pytest.skip("blocked deep run does not produce artifacts to compare")
 
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         monkeypatch.setattr(task_runner, "_commit_artifacts", lambda *a, **k: None)
         legacy_state = _state_for(tmp_path / "legacy", fixture)
         legacy_result = task_runner.task_node(

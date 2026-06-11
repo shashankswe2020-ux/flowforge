@@ -60,8 +60,9 @@ class TestRunHelp:
 
 
 class TestFlowForgeConfigDeepAgents:
-    def test_default_is_false(self) -> None:
-        assert FlowForgeConfig().deep_agents is False
+    def test_default_is_true(self) -> None:
+        # T14 — default flipped on for the Phase 4 rollout.
+        assert FlowForgeConfig().deep_agents is True
 
     def test_roundtrip(self) -> None:
         FlowForgeConfig(deep_agents=True).save()
@@ -133,7 +134,8 @@ class TestBuildLiveGraphDispatch:
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        monkeypatch.delenv(DEEP_AGENTS_ENV_VAR, raising=False)
+        # T14: explicit opt-out via env var (matches `--no-deep-agents`).
+        monkeypatch.setenv(DEEP_AGENTS_ENV_VAR, "0")
 
         called: dict[str, object] = {}
 
@@ -158,3 +160,45 @@ class TestBuildLiveGraphDispatch:
         assert result == "real-graph"
         assert "real" in called
         assert "deep" not in called
+
+
+# ---------------------------------------------------------------------------
+# T14 — Phase 4 default-on rollout
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultOn:
+    """T14 acceptance — the resolved default is now ``True`` and ``swe-forge
+    setup`` writes ``deep_agents=true`` into ``~/.flowforge/config.json``.
+    """
+
+    def test_default_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # No env, no config — the function fallback is True.
+        monkeypatch.delenv(DEEP_AGENTS_ENV_VAR, raising=False)
+        from flowforge.config.deep_agents import resolve_deep_agents_enabled
+
+        assert resolve_deep_agents_enabled() is True
+
+    def test_setup_writes_deep_agents_true(self) -> None:
+        # The dataclass default is what ``swe-forge setup`` persists when
+        # the wizard does not override it.
+        FlowForgeConfig().save()
+        loaded = FlowForgeConfig.load()
+        assert loaded.deep_agents is True
+
+    def test_no_deep_agents_still_works(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``--no-deep-agents`` (and ``FLOWFORGE_DEEP_AGENTS=0``) remain
+        reachable for one minor version per spec §13.15.
+        """
+        from flowforge.config.deep_agents import resolve_deep_agents_enabled
+
+        # Explicit CLI ``--no-deep-agents`` wins over every other source.
+        monkeypatch.setenv(DEEP_AGENTS_ENV_VAR, "1")
+        FlowForgeConfig(deep_agents=True).save()
+        assert resolve_deep_agents_enabled(cli_value=False) is False
+
+        # Env var alone is also enough.
+        monkeypatch.setenv(DEEP_AGENTS_ENV_VAR, "0")
+        assert resolve_deep_agents_enabled() is False

@@ -26,7 +26,10 @@ class FlowForgeConfig:
     max_tokens: int = 4096
     default_private: bool = True
     langgraph_port: int = 8123
-    deep_agents: bool = False
+    # Default flipped to True in T14 (Phase 4 rollout). The legacy
+    # path remains reachable via ``swe-forge run --no-deep-agents``
+    # (deprecated for one minor version per spec §13.15).
+    deep_agents: bool = True
 
     def save(self) -> None:
         """Persist config atomically with mode 0o600 from creation.

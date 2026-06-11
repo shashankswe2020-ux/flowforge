@@ -1,10 +1,11 @@
 # Spec: Enhance FlowForge Graph with LangChain Deep Agents
 
-> Status: **Draft**
+> Status: **Implemented** (2026-06-12, shipped in `v0.2.0`)
 > Author: spec agent
 > Date: 2026-06-11
 > Reference: https://docs.langchain.com/oss/python/deepagents/overview
 > Supersedes/extends: `docs/specs/flowforge-langgraph-agentic-development-pipeline.md`
+> Tracking plan: `docs/plans/task-1-deep-agents-enhancement.md`
 
 ---
 

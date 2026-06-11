@@ -63,4 +63,8 @@ def resolve_deep_agents_enabled(*, cli_value: bool | None = None) -> bool:
     if FlowForgeConfig.exists():
         return FlowForgeConfig.load().deep_agents
 
-    return False
+    # Default flipped to True in T14 (Phase 4 rollout). The legacy
+    # path is still reachable via ``--no-deep-agents`` /
+    # ``FLOWFORGE_DEEP_AGENTS=0`` for one minor version per spec
+    # §13.15.
+    return True

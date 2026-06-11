@@ -98,7 +98,9 @@ def cli() -> None:
     "deep_agents",
     default=None,
     help="Enable (or disable) the Deep Agents execution path for agentic "
-         "nodes. Overrides the FLOWFORGE_DEEP_AGENTS env var and the "
+         "nodes. As of v0.2 the default is ON; --no-deep-agents remains "
+         "available for one minor version (deprecated, slated for removal "
+         "in v0.4). Overrides the FLOWFORGE_DEEP_AGENTS env var and the "
          "persisted ~/.flowforge/config.json setting for this run only.",
 )
 def run(

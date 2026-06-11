@@ -196,7 +196,7 @@ class TestDeepAgentDispatch:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Ensure flag is unset.
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         # Forbid deep-agent dispatch.
         sentinel_called: dict[str, bool] = {"build": False}
 

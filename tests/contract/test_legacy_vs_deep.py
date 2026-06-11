@@ -376,7 +376,7 @@ class TestLegacyVsDeepContract:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Legacy
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         _stub_side_effects(monkeypatch, case)
         legacy_state = _state(str(tmp_path / "legacy"))
         legacy_llm = MockLLM(responses=[case.legacy_response])
@@ -405,7 +405,7 @@ class TestLegacyVsDeepContract:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         _stub_side_effects(monkeypatch, case)
         legacy_result = case.node_fn(
             _state(str(tmp_path / "legacy")),
@@ -427,7 +427,7 @@ class TestLegacyVsDeepContract:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         _stub_side_effects(monkeypatch, case)
         legacy_result = case.node_fn(
             _state(str(tmp_path / "legacy")),
@@ -472,7 +472,7 @@ class TestLegacyVsDeepContract:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         _stub_side_effects(monkeypatch, case)
         legacy_result = case.node_fn(
             _state(str(tmp_path)),
@@ -494,7 +494,7 @@ class TestReviewContract:
     ) -> None:
         review_case = next(c for c in _CASES if c.node_name == "code_review_node")
 
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         _stub_side_effects(monkeypatch, review_case)
         legacy_result = review_case.node_fn(
             _state(str(tmp_path / "legacy")),
@@ -853,7 +853,7 @@ class TestGenerativeContract:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         _stub_generative(monkeypatch, gcase)
         legacy_state = gcase.state_factory(str(tmp_path / "legacy"))
         legacy_result = gcase.node_fn(
@@ -882,7 +882,7 @@ class TestGenerativeContract:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         _stub_generative(monkeypatch, gcase)
         legacy_state = gcase.state_factory(str(tmp_path / "legacy"))
         legacy_result = gcase.node_fn(
@@ -934,7 +934,7 @@ class TestGenerativeContract:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("FLOWFORGE_DEEP_AGENTS", raising=False)
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "0")
         _stub_generative(monkeypatch, gcase)
         state = gcase.state_factory(str(tmp_path))
         legacy_result = gcase.node_fn(

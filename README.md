@@ -29,11 +29,21 @@ swe-forge run "build tic-tac-toe web app"
 swe-forge run "<prompt>" --repo my-name      # use/create a specific repo
 swe-forge run "<prompt>" --skip-github       # local-only, no remote
 swe-forge run "<prompt>" --no-studio         # skip LangGraph Studio
+swe-forge run "<prompt>" --no-deep-agents    # opt out of Deep Agents (deprecated, removed in v0.4)
 ```
 
 Generated projects land in `~/flowforge-workspace/<slug>/` and are
 pushed to `https://github.com/<you>/<slug>`. The `swe-forge` source
 repo itself is never written to.
+
+> **Deep Agents (default since v0.2)** — every agentic node runs as a
+> [LangChain Deep Agent](https://docs.langchain.com/oss/python/deepagents/overview)
+> with sub-agents, a virtual filesystem, and per-run resource budgets
+> (recursion 50, timeout 300 s, tool budget 200). The implementer
+> additionally runs a diff-based secret scanner before persisting any
+> file. To opt back into the legacy single-shot executors for one
+> minor version, use `--no-deep-agents`, set
+> `FLOWFORGE_DEEP_AGENTS=0`, or edit `~/.flowforge/config.json`.
 
 ### Prerequisites
 

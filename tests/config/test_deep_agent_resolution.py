@@ -40,8 +40,9 @@ def _isolated_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 class TestDefault:
-    def test_default_is_false(self) -> None:
-        assert resolve_deep_agents_enabled() is False
+    def test_default_is_true(self) -> None:
+        # T14 — fallback flipped to True for Phase 4 default-on rollout.
+        assert resolve_deep_agents_enabled() is True
 
 
 class TestEnvVar:

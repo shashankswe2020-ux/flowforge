@@ -463,15 +463,15 @@ version (acceptance §13.15). Update README, CHANGELOG, and the docs
 under `docs/specs/` to mark the spec as **Implemented**.
 
 **Acceptance criteria:**
-- [ ] Default `~/.flowforge/config.json` written by `swe-forge setup` is `{"deep_agents": true}`.
-- [ ] `--no-deep-agents` still works and is documented as deprecated.
-- [ ] CHANGELOG entry under the next minor version explains the migration.
-- [ ] Spec status updated to **Implemented**; `docs/plans/task-1-deep-agents-enhancement.md` marked complete.
+- [x] Default `~/.flowforge/config.json` written by `swe-forge setup` is `{"deep_agents": true}`. *(Verified by `tests/cli/test_deep_agent_flag.py::TestDefaultOn::test_setup_writes_deep_agents_true`.)*
+- [x] `--no-deep-agents` still works and is documented as deprecated. *(CLI help string flags removal in v0.4; covered by `TestDefaultOn::test_no_deep_agents_still_works`.)*
+- [x] CHANGELOG entry under the next minor version explains the migration. *(`CHANGELOG.md` `[0.2.0]` block — Added / Changed / Deprecated / Migration sections.)*
+- [x] Spec status updated to **Implemented**; `docs/plans/task-1-deep-agents-enhancement.md` marked complete. *(Spec frontmatter now reads "Implemented (2026-06-12, shipped in v0.2.0)".)*
 
 **Verification:**
-- [ ] `pytest tests/cli/test_deep_agent_flag.py::test_default_on`
-- [ ] `pytest tests/cli/test_deep_agent_flag.py::test_no_deep_agents_still_works`
-- [ ] Manual: `langgraph dev`, run pipeline, confirm `DeepAgentTrace` panel appears for every agentic node (acceptance §13.10).
+- [x] `pytest tests/cli/test_deep_agent_flag.py::TestDefaultOn::test_default_on`
+- [x] `pytest tests/cli/test_deep_agent_flag.py::TestDefaultOn::test_no_deep_agents_still_works`
+- [ ] Manual: `langgraph dev`, run pipeline, confirm `DeepAgentTrace` panel appears for every agentic node (acceptance §13.10). *(Deferred — requires a real provider key; recorded by Studio integration smoke test in next minor release.)*
 
 **Dependencies:** T13
 

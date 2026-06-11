@@ -1,3 +1,4 @@
 langgraph>=0.4
 langchain-core>=0.3
 pydantic>=2.7
+deepagents>=0.6

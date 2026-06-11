@@ -16,9 +16,20 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from flowforge.state.models import Finding, GraphState, IssueSeverity
+from flowforge.config.deep_agents import resolve_deep_agents_enabled
+from flowforge.deep_agents import AgentRole
+from flowforge.deep_agents.adapters import (
+    extract_findings,
+    materialize_files,
+)
+from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.nodes._workspace import get_workdir
+from flowforge.state.models import DeepAgentTrace, Finding, GraphState, IssueSeverity
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 
 class LLMProtocol(Protocol):
@@ -386,8 +397,13 @@ def security_audit_node(
     """Run security audit on task artifacts following security-auditor methodology.
 
     Produces classified findings, commits audit report to docs/security-audits/,
-    and creates GitHub issues with 'security' label for each finding.
+    and creates GitHub issues with 'security' label for each finding. When the
+    ``FLOWFORGE_DEEP_AGENTS`` flag is enabled, dispatches through the Deep
+    Agent factory; otherwise runs the legacy single-shot path.
     """
+    if resolve_deep_agents_enabled():
+        return _run_via_deep_agent(state, llm)
+
     prompt = _build_prompt(state)
     response = llm.invoke(prompt)
 
@@ -401,3 +417,64 @@ def security_audit_node(
     _create_github_issues(findings, state)
 
     return {"security_findings": findings}
+
+
+def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
+    """Deep Agent variant of ``security_audit_node`` (T7)."""
+    workdir = get_workdir(state)
+    files = materialize_files(state)
+    graph = build_deep_agent(
+        role=AgentRole.AUDITOR,
+        llm=cast("BaseChatModel", llm),
+        workdir=workdir,
+    )
+    payload: dict[str, Any] = {
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    "Audit the task artifacts in your VFS for exploitable"
+                    " vulnerabilities. Emit findings to"
+                    " vfs:/findings/security.json and a markdown report"
+                    " to vfs:/docs/security-audits/security-audit.md."
+                ),
+            },
+        ],
+        "files": files,
+    }
+    result = run_deep_agent_bounded(
+        graph,
+        payload,
+        role=AgentRole.AUDITOR,
+        node_name="security_audit_node",
+    )
+
+    findings = [
+        f.model_copy(update={"source_node": "security_audit_node"})
+        for f in extract_findings(result)
+    ]
+
+    raw_files = result.get("files")
+    vfs_keys: list[str] = (
+        sorted(k for k in raw_files if isinstance(k, str))
+        if isinstance(raw_files, dict) else []
+    )
+    raw_messages = result.get("messages")
+    messages: list[dict[str, object]] = (
+        [m for m in raw_messages if isinstance(m, dict)]
+        if isinstance(raw_messages, list) else []
+    )
+    trace = DeepAgentTrace(
+        role=AgentRole.AUDITOR,
+        messages_digest=DeepAgentTrace.digest_messages(messages),
+        vfs_keys=vfs_keys,
+    )
+
+    _commit_audit_to_repo(findings, {"summary": "", "positive_observations": []}, state)
+    _create_github_issues(findings, state)
+
+    return {
+        "security_findings": findings,
+        "deep_agent_traces": {"security_audit_node": trace},
+    }
+

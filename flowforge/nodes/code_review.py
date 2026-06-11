@@ -16,9 +16,20 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from flowforge.state.models import Finding, GraphState, IssueSeverity
+from flowforge.config.deep_agents import resolve_deep_agents_enabled
+from flowforge.deep_agents import AgentRole
+from flowforge.deep_agents.adapters import (
+    extract_findings,
+    materialize_files,
+)
+from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.nodes._workspace import get_workdir
+from flowforge.state.models import DeepAgentTrace, Finding, GraphState, IssueSeverity
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 
 class LLMProtocol(Protocol):
@@ -382,8 +393,13 @@ def code_review_node(
     """Run five-axis code review on task artifacts.
 
     Produces structured findings, commits review to docs/reviews/,
-    and creates GitHub issues for each finding.
+    and creates GitHub issues for each finding. When the
+    ``FLOWFORGE_DEEP_AGENTS`` flag is enabled, dispatches through the
+    Deep Agent factory; otherwise runs the legacy single-shot path.
     """
+    if resolve_deep_agents_enabled():
+        return _run_via_deep_agent(state, llm)
+
     prompt = _build_prompt(state)
     response = llm.invoke(prompt)
 
@@ -397,3 +413,73 @@ def code_review_node(
     _create_github_issues(findings, state)
 
     return {"review_findings": findings}
+
+
+def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
+    """Deep Agent variant of ``code_review_node`` (T7).
+
+    Returns the same state delta keys as the legacy path plus a
+    populated ``deep_agent_traces["code_review_node"]`` entry.
+    """
+    workdir = get_workdir(state)
+    files = materialize_files(state)
+    graph = build_deep_agent(
+        role=AgentRole.REVIEWER,
+        llm=cast("BaseChatModel", llm),
+        workdir=workdir,
+    )
+    payload: dict[str, Any] = {
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    "Review the task artifacts in your VFS using the"
+                    " five-axis methodology. Emit findings to"
+                    " vfs:/findings/review.json and a markdown report"
+                    " to vfs:/docs/reviews/code-review.md."
+                ),
+            },
+        ],
+        "files": files,
+    }
+    result = run_deep_agent_bounded(
+        graph,
+        payload,
+        role=AgentRole.REVIEWER,
+        node_name="code_review_node",
+    )
+
+    findings = [
+        f.model_copy(update={"source_node": "code_review_node"})
+        for f in extract_findings(result)
+    ]
+
+    raw_files = result.get("files")
+    vfs_keys: list[str] = (
+        sorted(k for k in raw_files if isinstance(k, str))
+        if isinstance(raw_files, dict) else []
+    )
+    raw_messages = result.get("messages")
+    messages: list[dict[str, object]] = (
+        [m for m in raw_messages if isinstance(m, dict)]
+        if isinstance(raw_messages, list) else []
+    )
+    trace = DeepAgentTrace(
+        role=AgentRole.REVIEWER,
+        messages_digest=DeepAgentTrace.digest_messages(messages),
+        vfs_keys=vfs_keys,
+    )
+
+    metadata: dict[str, Any] = {
+        "verdict": "request_changes" if findings else "approve",
+        "summary": "Deep-agent review run.",
+        "done_well": [],
+    }
+    _commit_review_to_repo(findings, metadata, state)
+    _create_github_issues(findings, state)
+
+    return {
+        "review_findings": findings,
+        "deep_agent_traces": {"code_review_node": trace},
+    }
+

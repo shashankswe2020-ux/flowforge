@@ -16,9 +16,27 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from flowforge.state.models import Finding, GraphState, IssueSeverity, TaskDefinition
+from flowforge.config.deep_agents import resolve_deep_agents_enabled
+from flowforge.deep_agents import AgentRole
+from flowforge.deep_agents.adapters import (
+    extract_findings,
+    materialize_files,
+)
+from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.nodes._workspace import get_workdir
+from flowforge.state.models import (
+    CapabilityType,
+    DeepAgentTrace,
+    Finding,
+    GraphState,
+    IssueSeverity,
+    TaskDefinition,
+)
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 
 class LLMProtocol(Protocol):
@@ -416,7 +434,12 @@ def test_engineer_node(
     Analyzes coverage gaps, test quality, level appropriateness,
     and potential bugs needing the Prove-It pattern.
     Commits test report to docs/test-reports/ and creates GitHub issues.
+    When the ``FLOWFORGE_DEEP_AGENTS`` flag is enabled, dispatches through
+    the Deep Agent factory; otherwise runs the legacy single-shot path.
     """
+    if resolve_deep_agents_enabled():
+        return _run_via_deep_agent(state, llm)
+
     prompt = _build_prompt(state)
     response = llm.invoke(prompt)
 
@@ -436,3 +459,139 @@ def test_engineer_node(
 
 
 test_engineer_node.__test__ = False  # type: ignore[attr-defined]
+
+
+def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
+    """Deep Agent variant of ``test_engineer_node`` (T7)."""
+    workdir = get_workdir(state)
+    files = materialize_files(state)
+    graph = build_deep_agent(
+        role=AgentRole.TESTER,
+        llm=cast("BaseChatModel", llm),
+        workdir=workdir,
+    )
+    payload: dict[str, Any] = {
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    "Evaluate test quality on the artifacts in your VFS."
+                    " Emit findings to vfs:/findings/test.json, propose"
+                    " follow-up test tasks at"
+                    " vfs:/context/proposed_tasks.json, and write a"
+                    " markdown report to"
+                    " vfs:/docs/test-reports/test-report.md."
+                ),
+            },
+        ],
+        "files": files,
+    }
+    result = run_deep_agent_bounded(
+        graph,
+        payload,
+        role=AgentRole.TESTER,
+        node_name="test_engineer_node",
+    )
+
+    findings = [
+        f.model_copy(update={"source_node": "test_engineer_node"})
+        for f in extract_findings(result)
+    ]
+    existing_task_ids = {t.task_id for t in state.tasks}
+    proposed_tasks = _extract_proposed_tasks(result, existing_task_ids)
+
+    raw_files = result.get("files")
+    vfs_keys: list[str] = (
+        sorted(k for k in raw_files if isinstance(k, str))
+        if isinstance(raw_files, dict) else []
+    )
+    raw_messages = result.get("messages")
+    messages: list[dict[str, object]] = (
+        [m for m in raw_messages if isinstance(m, dict)]
+        if isinstance(raw_messages, list) else []
+    )
+    trace = DeepAgentTrace(
+        role=AgentRole.TESTER,
+        messages_digest=DeepAgentTrace.digest_messages(messages),
+        vfs_keys=vfs_keys,
+    )
+
+    metadata: dict[str, Any] = {
+        "summary": "Deep-agent test review run.",
+        "coverage_assessment": {},
+    }
+    _commit_report_to_repo(
+        findings,
+        proposed_tasks,
+        metadata,
+        state,
+    )
+    _create_github_issues(findings, state)
+
+    return {
+        "test_findings": findings,
+        "proposed_tasks": proposed_tasks,
+        "deep_agent_traces": {"test_engineer_node": trace},
+    }
+
+
+def _extract_proposed_tasks(
+    result: dict[str, object],
+    existing_task_ids: set[str] | None = None,
+) -> list[TaskDefinition]:
+    """Parse ``vfs:/context/proposed_tasks.json`` from agent VFS.
+
+    Tolerant of missing or malformed entries: skips invalid items and
+    duplicates of any ID in ``existing_task_ids``.
+    """
+    raw_files = result.get("files")
+    if not isinstance(raw_files, dict):
+        return []
+    body = raw_files.get("vfs:/context/proposed_tasks.json")
+    if not isinstance(body, str):
+        return []
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, list):
+        return []
+
+    seen: set[str] = set(existing_task_ids or ())
+    tasks: list[TaskDefinition] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        complexity = str(item.get("estimated_complexity", "s")).lower()
+        if complexity not in ("xs", "s", "m", "l"):
+            complexity = "s"
+        capability_raw = str(item.get("capability_type", "agent_only"))
+        try:
+            capability = CapabilityType(capability_raw)
+        except ValueError:
+            capability = CapabilityType.AGENT_ONLY
+        ac_raw = item.get("acceptance_checks", [])
+        acceptance = (
+            [str(x) for x in ac_raw if isinstance(x, str)]
+            if isinstance(ac_raw, list) else []
+        )
+        task_id = str(item.get("task_id", f"test-task-{len(tasks) + 1}"))
+        if task_id in seen:
+            continue
+        try:
+            tasks.append(
+                TaskDefinition(
+                    task_id=task_id,
+                    title=str(item["title"]),
+                    description=str(item["description"]),
+                    acceptance_checks=acceptance,
+                    estimated_complexity=complexity,
+                    capability_type=capability,
+                    verification_step=str(item.get("verification_step", "pytest")),
+                ),
+            )
+            seen.add(task_id)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return tasks
+

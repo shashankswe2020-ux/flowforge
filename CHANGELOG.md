@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2026-06-12
+
+### Fixed
+
+- **PyPI project page now renders the pipeline screenshot.** The README
+  image reference was switched from a repo-relative path to an absolute
+  `raw.githubusercontent.com` URL so warehouse renders it correctly.
+
 ## [0.2.2] - 2026-06-12
 
 ### Fixed

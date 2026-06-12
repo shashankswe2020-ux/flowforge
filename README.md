@@ -10,7 +10,7 @@ Multi-agent LangGraph framework for autonomous software development.
 filed issues for every finding, opens a pull request on a feature
 branch, and pushes a tagged release when the quality gates pass.
 
-![FlowForge LangGraph pipeline](docs/screenshots/langgraph-pipeline.png)
+![FlowForge LangGraph pipeline](https://raw.githubusercontent.com/shashankswe2020-ux/flowforge/main/docs/screenshots/langgraph-pipeline.png)
 
 *Live view of the FlowForge graph executing in LangGraph Studio.*
 

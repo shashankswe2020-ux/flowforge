@@ -23,6 +23,7 @@ from flowforge.dag.validator import validate_dag
 from flowforge.deep_agents import AgentRole
 from flowforge.deep_agents.adapters import materialize_files
 from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.nodes._llm import invoke_llm
 from flowforge.nodes._workspace import get_workdir
 from flowforge.state.models import (
     DeepAgentTrace,
@@ -79,21 +80,13 @@ def _build_prompt(state: GraphState) -> str:
             f"**Commands**: {', '.join(f'{k}: `{v}`' for k, v in spec.commands.items())}"
         )
     if spec.project_structure:
-        spec_context_parts.append(
-            f"**Project structure**: {'; '.join(spec.project_structure)}"
-        )
+        spec_context_parts.append(f"**Project structure**: {'; '.join(spec.project_structure)}")
     if spec.testing_strategy:
-        spec_context_parts.append(
-            f"**Testing strategy**: {'; '.join(spec.testing_strategy)}"
-        )
+        spec_context_parts.append(f"**Testing strategy**: {'; '.join(spec.testing_strategy)}")
     if spec.security_considerations:
-        spec_context_parts.append(
-            f"**Security**: {'; '.join(spec.security_considerations)}"
-        )
+        spec_context_parts.append(f"**Security**: {'; '.join(spec.security_considerations)}")
     if spec.assumptions:
-        spec_context_parts.append(
-            f"**Assumptions**: {'; '.join(spec.assumptions)}"
-        )
+        spec_context_parts.append(f"**Assumptions**: {'; '.join(spec.assumptions)}")
     if spec.boundaries:
         boundary_parts = []
         for tier, items in spec.boundaries.items():
@@ -263,7 +256,7 @@ def plan_node(
         return _run_via_deep_agent(state, llm)
 
     prompt = _build_prompt(state)
-    response = llm.invoke(prompt)
+    response = invoke_llm(llm, prompt, node_name="plan_node")
 
     # Handle response — strip markdown fences if present
     content = response.content if hasattr(response, "content") else str(response)
@@ -333,10 +326,18 @@ def plan_node(
 def _normalize_complexity(value: str) -> str:
     """Normalize LLM complexity response to xs/s/m/l."""
     mapping = {
-        "xs": "xs", "extra-small": "xs", "extra_small": "xs",
-        "s": "s", "small": "s", "low": "s",
-        "m": "m", "medium": "m", "med": "m",
-        "l": "l", "large": "l", "high": "l",
+        "xs": "xs",
+        "extra-small": "xs",
+        "extra_small": "xs",
+        "s": "s",
+        "small": "s",
+        "low": "s",
+        "m": "m",
+        "medium": "m",
+        "med": "m",
+        "l": "l",
+        "large": "l",
+        "high": "l",
     }
     return mapping.get(value.lower().strip(), "m")
 
@@ -506,11 +507,17 @@ def _commit_plan_to_repo(
         rel_mmd = mmd_path.relative_to(workdir)
         subprocess.run(
             ["git", "add", str(rel), str(rel_mmd)],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         subprocess.run(
             ["git", "commit", "-m", f"docs: add implementation plan ({plan_path.name})"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
@@ -587,7 +594,8 @@ def _extract_plan(
 
 
 def _run_via_deep_agent(
-    state: GraphState, llm: LLMProtocol,
+    state: GraphState,
+    llm: LLMProtocol,
 ) -> dict[str, Any]:
     """Deep Agent variant of ``plan_node`` (T8)."""
     workdir = get_workdir(state)
@@ -629,15 +637,11 @@ def _run_via_deep_agent(
 
     raw_files = result.get("files")
     vfs_keys: list[str] = (
-        sorted(k for k in raw_files if isinstance(k, str))
-        if isinstance(raw_files, dict)
-        else []
+        sorted(k for k in raw_files if isinstance(k, str)) if isinstance(raw_files, dict) else []
     )
     raw_messages = result.get("messages")
     messages: list[dict[str, object]] = (
-        [m for m in raw_messages if isinstance(m, dict)]
-        if isinstance(raw_messages, list)
-        else []
+        [m for m in raw_messages if isinstance(m, dict)] if isinstance(raw_messages, list) else []
     )
     trace = DeepAgentTrace(
         role=AgentRole.PLANNER,
@@ -658,7 +662,7 @@ def _run_via_deep_agent(
 def _legacy_plan(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
     """Legacy single-shot fallback (extracted for fallback reuse)."""
     prompt = _build_prompt(state)
-    response = llm.invoke(prompt)
+    response = invoke_llm(llm, prompt, node_name="plan_node")
     content = response.content if hasattr(response, "content") else str(response)
     content = content.strip()
     if content.startswith("```"):

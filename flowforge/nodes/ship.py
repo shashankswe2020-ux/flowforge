@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from flowforge.nodes._llm import invoke_llm
 from flowforge.state.models import (
     GraphState,
     IssueDisposition,
@@ -209,7 +210,7 @@ def _build_readme_prompt(state: GraphState) -> str:
 - Objective: {state.spec.objective}
 - Target Users: {state.spec.target_users}
 - Summary: {state.spec.summary}
-- Tech Stack: {', '.join(state.spec.tech_stack)}
+- Tech Stack: {", ".join(state.spec.tech_stack)}
 - Commands: {json.dumps(state.spec.commands)}
 - Acceptance Criteria: {json.dumps(state.spec.acceptance_criteria)}
 - Security: {json.dumps(state.spec.security_considerations)}
@@ -218,8 +219,7 @@ def _build_readme_prompt(state: GraphState) -> str:
     plan_section = ""
     if state.implementation_plan:
         tasks_desc = [
-            f"- {t.title}: {t.description}"
-            for t in state.implementation_plan.dag.tasks[:10]
+            f"- {t.title}: {t.description}" for t in state.implementation_plan.dag.tasks[:10]
         ]
         plan_section = f"""
 ## Implementation Plan
@@ -266,7 +266,11 @@ def _build_changelog_prompt(state: GraphState, version: str) -> str:
             changes.append(f"- Implemented: {t.definition.title}")
 
     if state.triaged_issues:
-        fixed = [i for i in state.triaged_issues if i.disposition == IssueDisposition.MUST_FIX_BEFORE_SHIP]
+        fixed = [
+            i
+            for i in state.triaged_issues
+            if i.disposition == IssueDisposition.MUST_FIX_BEFORE_SHIP
+        ]
         for issue in fixed[:5]:
             changes.append(f"- Fixed: {issue.remediation}")
 
@@ -293,7 +297,7 @@ Output ONLY the changelog entry markdown, no wrapping fences.
 def _generate_readme(state: GraphState, llm: LLMProtocol) -> str:
     """Generate README content via LLM."""
     prompt = _build_readme_prompt(state)
-    response = llm.invoke(prompt)
+    response = invoke_llm(llm, prompt, node_name="ship_node")
     content = response.content if hasattr(response, "content") else str(response)
     # Strip markdown fences if present
     if content.startswith("```"):
@@ -308,7 +312,7 @@ def _generate_readme(state: GraphState, llm: LLMProtocol) -> str:
 def _generate_changelog_entry(state: GraphState, version: str, llm: LLMProtocol) -> str:
     """Generate CHANGELOG entry via LLM."""
     prompt = _build_changelog_prompt(state, version)
-    response = llm.invoke(prompt)
+    response = invoke_llm(llm, prompt, node_name="ship_node")
     content = response.content if hasattr(response, "content") else str(response)
     if content.startswith("```"):
         lines = content.split("\n")
@@ -339,7 +343,10 @@ def _write_changelog(entry: str, workdir: Path) -> Path:
         else:
             new_content = entry + "\n\n" + existing
     else:
-        new_content = "# Changelog\n\nAll notable changes to this project will be documented in this file.\n\n" + entry
+        new_content = (
+            "# Changelog\n\nAll notable changes to this project will be documented in this file.\n\n"
+            + entry
+        )
 
     changelog.write_text(new_content + "\n")
     return changelog
@@ -361,18 +368,26 @@ def _commit_release_artifacts(version: str, files: list[Path], workdir: Path) ->
         if pyproject.exists():
             subprocess.run(
                 ["git", "add", "pyproject.toml"],
-                cwd=cwd, capture_output=True, check=True,
+                cwd=cwd,
+                capture_output=True,
+                check=True,
             )
 
         subprocess.run(
             ["git", "commit", "-m", f"release: v{version} — update README, CHANGELOG, version"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
 
         # Get commit SHA
         sha_result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return sha_result.stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -384,7 +399,10 @@ def _create_git_tag(version: str, workdir: Path) -> bool:
     try:
         subprocess.run(
             ["git", "tag", "-a", f"v{version}", "-m", f"Release v{version}"],
-            cwd=str(workdir), capture_output=True, text=True, check=True,
+            cwd=str(workdir),
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -398,14 +416,20 @@ def _push_to_remote(workdir: Path) -> bool:
         # Check if a remote named 'origin' exists
         result = subprocess.run(
             ["git", "remote"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         if "origin" not in result.stdout.split():
             return False
 
         subprocess.run(
             ["git", "push", "origin", "HEAD", "--follow-tags"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -416,7 +440,10 @@ def _current_branch(workdir: Path) -> str | None:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=str(workdir), capture_output=True, text=True, check=True,
+            cwd=str(workdir),
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return result.stdout.strip() or None
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -429,13 +456,19 @@ def _push_branch(workdir: Path, branch: str) -> bool:
     try:
         result = subprocess.run(
             ["git", "remote"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         if "origin" not in result.stdout.split():
             return False
         subprocess.run(
             ["git", "push", "-u", "origin", branch, "--follow-tags"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -477,17 +510,15 @@ def _build_pr_body(state: GraphState, *, status: str, branch: str) -> str:
             statuses[t.status.value] = statuses.get(t.status.value, 0) + 1
         status_str = ", ".join(f"{k}={v}" for k, v in sorted(statuses.items()))
         lines.append(f"## Generated code")
-        lines.append(f"{len(state.tasks)} tasks ({status_str}), {artifact_count} artifacts written.")
+        lines.append(
+            f"{len(state.tasks)} tasks ({status_str}), {artifact_count} artifacts written."
+        )
         lines.append("")
 
     must_fix = [
-        i for i in state.triaged_issues
-        if i.disposition == IssueDisposition.MUST_FIX_BEFORE_SHIP
+        i for i in state.triaged_issues if i.disposition == IssueDisposition.MUST_FIX_BEFORE_SHIP
     ]
-    follow_up = [
-        i for i in state.triaged_issues
-        if i.disposition == IssueDisposition.CAN_FOLLOW_UP
-    ]
+    follow_up = [i for i in state.triaged_issues if i.disposition == IssueDisposition.CAN_FOLLOW_UP]
 
     if must_fix:
         lines.append(f"## ❌ Must fix before merge ({len(must_fix)})")
@@ -522,18 +553,32 @@ def _open_pull_request(
         # If a PR already exists for this branch, return its URL.
         result = subprocess.run(
             ["gh", "pr", "view", branch, "--json", "url", "-q", ".url"],
-            cwd=cwd, capture_output=True, text=True, check=False,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
 
         result = subprocess.run(
-            ["gh", "pr", "create",
-             "--head", branch,
-             "--base", base,
-             "--title", title,
-             "--body", body],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            [
+                "gh",
+                "pr",
+                "create",
+                "--head",
+                branch,
+                "--base",
+                base,
+                "--title",
+                title,
+                "--body",
+                body,
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         url = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else None
         return url
@@ -638,7 +683,10 @@ def ship_node(
             pr_title = f"{title_prefix}: {prompt_short} [{status_label}]"
             pr_body = _build_pr_body(state, status=status_label, branch=branch)
             pr_url = _open_pull_request(
-                workdir, branch=branch, title=pr_title, body=pr_body,
+                workdir,
+                branch=branch,
+                title=pr_title,
+                body=pr_body,
             )
     else:
         # No feature branch (e.g. legacy/local-only) — fall back to direct push.

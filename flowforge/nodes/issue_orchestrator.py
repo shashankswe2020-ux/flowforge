@@ -26,6 +26,7 @@ from flowforge.config.deep_agents import resolve_deep_agents_enabled
 from flowforge.deep_agents import AgentRole
 from flowforge.deep_agents.adapters import materialize_files
 from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.nodes._llm import invoke_llm
 from flowforge.nodes._workspace import get_workdir
 from flowforge.state.models import (
     DeepAgentTrace,
@@ -99,24 +100,56 @@ def _classify_category(finding: Finding) -> str:
     combined = f"{title_lower} {desc_lower}"
 
     security_signals = [
-        "xss", "injection", "command injection", "sql injection",
-        "token", "auth", "authentication", "pkce", "csrf",
-        "exposure", "vulnerability", "cve", "owasp",
+        "xss",
+        "injection",
+        "command injection",
+        "sql injection",
+        "token",
+        "auth",
+        "authentication",
+        "pkce",
+        "csrf",
+        "exposure",
+        "vulnerability",
+        "cve",
+        "owasp",
     ]
     bug_signals = [
-        "crash", "hang", "timeout", "flaky", "error", "exception",
-        "missing handler", "null", "undefined", "race condition",
+        "crash",
+        "hang",
+        "timeout",
+        "flaky",
+        "error",
+        "exception",
+        "missing handler",
+        "null",
+        "undefined",
+        "race condition",
     ]
     test_signals = [
-        "test", "coverage", "missing test", "untested", "spec",
-        "assertion", "mock",
+        "test",
+        "coverage",
+        "missing test",
+        "untested",
+        "spec",
+        "assertion",
+        "mock",
     ]
     doc_signals = [
-        "document", "readme", "comment", "jsdoc", "docstring",
-        "outdated", "stale",
+        "document",
+        "readme",
+        "comment",
+        "jsdoc",
+        "docstring",
+        "outdated",
+        "stale",
     ]
     dep_signals = [
-        "dependency", "version", "bump", "upgrade", "deprecated",
+        "dependency",
+        "version",
+        "bump",
+        "upgrade",
+        "deprecated",
         "package",
     ]
 
@@ -295,18 +328,20 @@ def _render_triage_markdown(
     follow_up = sum(1 for i in issues if i.disposition == IssueDisposition.CAN_FOLLOW_UP)
     rejected = sum(1 for i in issues if i.disposition == IssueDisposition.REJECTED)
 
-    lines.extend([
-        "## Disposition Breakdown",
-        "",
-        f"| Disposition | Count |",
-        f"|-------------|-------|",
-        f"| Must Fix Before Ship | {must_fix} |",
-        f"| Can Follow Up | {follow_up} |",
-        f"| Rejected | {rejected} |",
-        "",
-        "## Issues by Priority",
-        "",
-    ])
+    lines.extend(
+        [
+            "## Disposition Breakdown",
+            "",
+            f"| Disposition | Count |",
+            f"|-------------|-------|",
+            f"| Must Fix Before Ship | {must_fix} |",
+            f"| Can Follow Up | {follow_up} |",
+            f"| Rejected | {rejected} |",
+            "",
+            "## Issues by Priority",
+            "",
+        ]
+    )
 
     # Group by category
     category_issues: dict[str, list[Issue]] = {}
@@ -371,7 +406,9 @@ def _commit_triage_to_repo(
         subprocess.run(["git", "add", str(rel)], cwd=cwd, capture_output=True, check=True)
         subprocess.run(
             ["git", "commit", "-m", f"docs: add triage report #{next_num}"],
-            cwd=cwd, capture_output=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass  # Skip if git not available or commit fails
@@ -401,7 +438,9 @@ def _create_github_issues(
         try:
             subprocess.run(
                 ["gh", "label", "create", label_name, "--color", color, "--description", desc],
-                cwd=cwd, capture_output=True, text=True,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
             )
         except FileNotFoundError:
             return  # gh CLI not available
@@ -483,23 +522,40 @@ def _close_matching_issues(issue: Issue, finding: Finding, cwd: str) -> None:
         # Search for open issues with matching fingerprint in title
         result = subprocess.run(
             [
-                "gh", "issue", "list",
-                "--label", "issue-by-orchestrator",
-                "--state", "open",
-                "--search", finding.title,
-                "--json", "number",
+                "gh",
+                "issue",
+                "list",
+                "--label",
+                "issue-by-orchestrator",
+                "--state",
+                "open",
+                "--search",
+                finding.title,
+                "--json",
+                "number",
             ],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         issues_data = json.loads(result.stdout)
         for gh_issue in issues_data:
             subprocess.run(
                 [
-                    "gh", "issue", "close", str(gh_issue["number"]),
-                    "--reason", "not planned",
-                    "--comment", f"Closed by orchestrator triage: {issue.remediation}",
+                    "gh",
+                    "issue",
+                    "close",
+                    str(gh_issue["number"]),
+                    "--reason",
+                    "not planned",
+                    "--comment",
+                    f"Closed by orchestrator triage: {issue.remediation}",
                 ],
-                cwd=cwd, capture_output=True, text=True, check=True,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                check=True,
             )
     except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
         pass  # Skip silently if gh unavailable or parsing fails
@@ -538,7 +594,7 @@ def issue_orchestrator_node(
         return _run_via_deep_agent(state, llm, deduped, prioritized)
 
     prompt = _build_prompt(prioritized)
-    response = llm.invoke(prompt)
+    response = invoke_llm(llm, prompt, node_name="issue_orchestrator_node")
 
     content = response.content if hasattr(response, "content") else str(response)
     issues = _parse_issues(content, deduped)
@@ -588,7 +644,8 @@ def _extract_issues(
 
 
 def _parse_issue_items(
-    items: list[Any], deduped: dict[str, Finding],
+    items: list[Any],
+    deduped: dict[str, Finding],
 ) -> list[Issue]:
     """Build ``Issue`` objects from agent-produced list, dropping invalid rows."""
     issues: list[Issue] = []
@@ -622,9 +679,7 @@ def _parse_issue_items(
                 remediation=remediation,
                 owner=item.get("owner") if isinstance(item.get("owner"), str) else None,
                 sla_target=(
-                    item.get("sla_target")
-                    if isinstance(item.get("sla_target"), str)
-                    else None
+                    item.get("sla_target") if isinstance(item.get("sla_target"), str) else None
                 ),
             ),
         )
@@ -688,7 +743,7 @@ def _run_via_deep_agent(
         # a partial trace, matching the contract used by the other deep
         # wrappers (clarification / spec / plan).
         prompt = _build_prompt(prioritized)
-        response = llm.invoke(prompt)
+        response = invoke_llm(llm, prompt, node_name="issue_orchestrator_node")
         content = response.content if hasattr(response, "content") else str(response)
         issues = _parse_issues(content, deduped)
         tool_operations = _build_tool_operations(issues)
@@ -703,15 +758,11 @@ def _run_via_deep_agent(
 
     raw_files = result.get("files")
     vfs_keys: list[str] = (
-        sorted(k for k in raw_files if isinstance(k, str))
-        if isinstance(raw_files, dict)
-        else []
+        sorted(k for k in raw_files if isinstance(k, str)) if isinstance(raw_files, dict) else []
     )
     raw_messages = result.get("messages")
     messages: list[dict[str, object]] = (
-        [m for m in raw_messages if isinstance(m, dict)]
-        if isinstance(raw_messages, list)
-        else []
+        [m for m in raw_messages if isinstance(m, dict)] if isinstance(raw_messages, list) else []
     )
     trace = DeepAgentTrace(
         role=AgentRole.TRIAGER,

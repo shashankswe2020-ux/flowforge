@@ -33,7 +33,9 @@ and can publish tagged releases when quality gates pass.
 
 ## Demo
 
-- Demo video: https://youtu.be/AhMBkaBqc8Y
+[![Watch the demo video](https://img.youtube.com/vi/AhMBkaBqc8Y/maxresdefault.jpg)](https://youtu.be/AhMBkaBqc8Y)
+
+Watch the demo video: https://youtu.be/AhMBkaBqc8Y
 
 <details>
 <summary><strong>What you will see in the demo</strong></summary>

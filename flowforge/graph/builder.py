@@ -226,6 +226,18 @@ def _exchange_for_copilot_token(oauth_token: str) -> str:
     return get_session_token(oauth_token)
 
 
+def _non_reasoning_max_tokens(model: str) -> int:
+    """Output-token budget for non-reasoning chat models.
+
+    Spec/plan nodes emit large JSON payloads. At 4096 tokens these truncated
+    mid-string and crashed downstream ``json.loads`` with "Unterminated string".
+    Claude models (esp. Opus) are far more verbose and can exceed 16k tokens of
+    JSON; they support a 32k output cap. gpt-4o-class models cap at 16384 and
+    reject larger requests.
+    """
+    return 32768 if "claude" in model.lower() else 16384
+
+
 def build_live_graph() -> CompiledStateGraph:  # type: ignore[type-arg]
     """Build graph with LLM configured from environment variables.
 
@@ -297,12 +309,7 @@ def build_live_graph() -> CompiledStateGraph:  # type: ignore[type-arg]
         chat_kwargs["model_kwargs"] = {"max_completion_tokens": 16384}
     else:
         chat_kwargs["temperature"] = 0.0
-        # Spec/plan nodes emit large JSON payloads (acceptance criteria plus the
-        # full spec/plan markdown embedded as string fields). 4096 output tokens
-        # truncated these mid-string and crashed downstream json.loads with an
-        # "Unterminated string" error. 16384 is within the output cap of every
-        # Copilot-served chat model (gpt-4o/4.1, Claude Sonnet/Opus).
-        chat_kwargs["max_tokens"] = 16384
+        chat_kwargs["max_tokens"] = _non_reasoning_max_tokens(model)
 
     llm = ChatOpenAI(**chat_kwargs)
 

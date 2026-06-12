@@ -541,7 +541,7 @@ def web_search(*, query: str, max_results: int = 5) -> WebSearchResult:
             ]
             return WebSearchResult(query=args.query, results=items)
         except Exception as exc:  # noqa: BLE001 — surface as stop-signal
-            _log.warning("web_search backend error: %s", exc)
+            logger.warning("web_search backend error: %s", exc)
             return WebSearchResult(
                 query=args.query,
                 results=[

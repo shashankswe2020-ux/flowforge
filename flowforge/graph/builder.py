@@ -228,10 +228,12 @@ def build_live_graph() -> CompiledStateGraph:  # type: ignore[type-arg]
 
     from flowforge.config.deep_agents import resolve_deep_agents_enabled
 
-    wrapped = _LLMWrapper(llm)
     if resolve_deep_agents_enabled():
-        return build_deep_agent_graph(wrapped)
-    return build_real_graph(wrapped)
+        # Deep agents need a real BaseChatModel (deepagents calls
+        # methods beyond .invoke); the wrapper is only suitable for
+        # legacy nodes that exercise the minimal invoke(str) contract.
+        return build_deep_agent_graph(llm)
+    return build_real_graph(_LLMWrapper(llm))
 
 
 def build_deep_agent_graph(llm: Any) -> CompiledStateGraph:  # type: ignore[type-arg]  # noqa: ANN401

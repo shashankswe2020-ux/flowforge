@@ -471,7 +471,11 @@ under `docs/specs/` to mark the spec as **Implemented**.
 **Verification:**
 - [x] `pytest tests/cli/test_deep_agent_flag.py::TestDefaultOn::test_default_on`
 - [x] `pytest tests/cli/test_deep_agent_flag.py::TestDefaultOn::test_no_deep_agents_still_works`
-- [ ] Manual: `langgraph dev`, run pipeline, confirm `DeepAgentTrace` panel appears for every agentic node (acceptance §13.10). *(Deferred — requires a real provider key; recorded by Studio integration smoke test in next minor release.)*
+- [ ] Manual: `langgraph dev`, run pipeline, confirm `DeepAgentTrace` panel appears for every agentic node (acceptance §13.10). *(Attempted 2026-06-12 with real GitHub Models provider; fixed `_LLMWrapper` blocker (commit pending), but smoke surfaced three follow-up issues that block trace emission end-to-end:*
+    1. *`gpt-4o-mini` (default GH Models config) caps input at 8K tokens — too small for the deep-agent envelope; needs a wider context model (`gpt-4o`, `gpt-4.1`) or prompt budgeting.*
+    2. *`clarification`/`spec`/`plan` deep paths silently fall back to legacy when `_extract_*` cannot parse the agent's output — no `DeepAgentTrace` is recorded on fallback. Needs either stricter prompt scaffolding or a trace emission on the fallback edge.*
+    3. *`task_node` (IMPLEMENTER) deep path raises `ToolNotAllowedError` for `mcp_invoke` because no MCP transport is registered in `langgraph dev`. Needs either a default no-op transport or guarded tool injection.*
+    *Acceptance closure deferred to follow-up tickets covering items 1–3.)*
 
 **Dependencies:** T13
 

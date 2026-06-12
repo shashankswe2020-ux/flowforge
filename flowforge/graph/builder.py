@@ -297,7 +297,12 @@ def build_live_graph() -> CompiledStateGraph:  # type: ignore[type-arg]
         chat_kwargs["model_kwargs"] = {"max_completion_tokens": 16384}
     else:
         chat_kwargs["temperature"] = 0.0
-        chat_kwargs["max_tokens"] = 4096
+        # Spec/plan nodes emit large JSON payloads (acceptance criteria plus the
+        # full spec/plan markdown embedded as string fields). 4096 output tokens
+        # truncated these mid-string and crashed downstream json.loads with an
+        # "Unterminated string" error. 16384 is within the output cap of every
+        # Copilot-served chat model (gpt-4o/4.1, Claude Sonnet/Opus).
+        chat_kwargs["max_tokens"] = 16384
 
     llm = ChatOpenAI(**chat_kwargs)
 

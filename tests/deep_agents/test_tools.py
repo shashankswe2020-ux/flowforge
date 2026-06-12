@@ -168,6 +168,19 @@ class TestSubprocessTools:
         assert env is not None
         assert env.get("CI") == "1"
 
+    def test_run_tests_returns_127_when_pytest_missing(
+        self, workdir: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def _raise_file_not_found(
+            argv: Sequence[str], **kwargs: Any,
+        ) -> _FakeCompleted:
+            raise FileNotFoundError(f"[Errno 2] No such file or directory: {argv[0]!r}")
+
+        monkeypatch.setattr(tools.subprocess, "run", _raise_file_not_found)
+        result = run_tests(workdir=workdir)
+        assert result.returncode == 127
+        assert "No such file or directory" in result.stderr
+
     def test_run_tests_prefers_pytest_when_python_markers_present(
         self, workdir: Path, patch_run: list[dict[str, Any]],
     ) -> None:

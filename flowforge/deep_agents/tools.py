@@ -168,6 +168,11 @@ def _run_subprocess(argv: list[str], *, workdir: Path) -> CommandResult:
     terminated and a ``CommandResult`` with returncode ``124`` is
     returned so the caller (and LLM) sees a normal failure, not an
     exception.
+
+    Missing executables are also converted into a normal
+    ``CommandResult`` (returncode ``127``), so a generated non-Python
+    project does not hard-crash the whole graph when ``pytest`` is not
+    available in the runtime environment.
     """
     started_at = time.monotonic()
     timeout_s = _resolve_subprocess_timeout()
@@ -195,6 +200,10 @@ def _run_subprocess(argv: list[str], *, workdir: Path) -> CommandResult:
             if stderr
             else f"[subprocess timed out after {timeout_s:g}s]"
         )
+    except FileNotFoundError as exc:
+        returncode = 127  # POSIX shell convention for command-not-found
+        stdout = ""
+        stderr = str(exc)
     duration_ms = int((time.monotonic() - started_at) * 1000)
     return CommandResult(
         returncode=returncode,

@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-06-12
+
+### Fixed
+
+- **Fresh-install run crash fixed** — package data now includes deep-agent
+  sub-agent instruction stubs under
+  `flowforge/deep_agents/instructions/subagents/*.md` by switching
+  setuptools package-data from `instructions/*.md` to
+  `instructions/**/*.md`. This resolves the runtime
+  `FileNotFoundError` on `swe-forge run` from a clean PyPI install.
+- **LangGraph dependency mismatch fixed** — runtime dependencies are pinned to
+  a known-compatible set used by validated runs:
+  `langgraph-cli[inmem]==0.4.27`, `langgraph-api==0.9.0`, and
+  `langgraph-runtime-inmem==0.29.0`. This prevents resolver drift into
+  incompatible dev builds that fail server startup.
+
 ## [0.2.1] - 2026-06-12
 
 ### Fixed

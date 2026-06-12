@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swe-forge"
-version = "0.2.1"
+version = "0.2.2"
 description = "Multi-agent LangGraph framework for autonomous software development"
 requires-python = ">=3.12"
 license = "MIT"
@@ -25,7 +25,9 @@ classifiers = [
 dependencies = [
     "langgraph>=0.4",
     "langgraph-sdk>=0.4",
-    "langgraph-cli[inmem]>=0.1",
+    "langgraph-cli[inmem]==0.4.27",
+    "langgraph-api==0.9.0",
+    "langgraph-runtime-inmem==0.29.0",
     "langchain-core>=0.3",
     "langchain-openai>=0.3",
     "pydantic>=2.7",
@@ -42,7 +44,7 @@ include = ["flowforge*"]
 exclude = ["tests*", "scripts*", "docs*"]
 
 [tool.setuptools.package-data]
-"flowforge.deep_agents" = ["skills/**/SKILL.md", "instructions/*.md"]
+"flowforge.deep_agents" = ["skills/**/SKILL.md", "instructions/**/*.md"]
 
 [project.optional-dependencies]
 dev = [

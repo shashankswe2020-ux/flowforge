@@ -91,3 +91,11 @@ def test_safe_path_rejects_escape() -> None:
 
     with pytest.raises(tools.PathTraversalError):
         tools._safe_path(Path("/tmp"), "/foo/../../etc/passwd")
+
+
+def test_pyproject_package_data_includes_subagent_instruction_stubs() -> None:
+    """Release guard: wheel package-data must include nested instruction files."""
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    assert '"flowforge.deep_agents"' in text
+    assert "instructions/**/*.md" in text

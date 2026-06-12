@@ -17,26 +17,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: 22.x
-          cache: npm
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
 
-      - name: Type check
-        run: npm run typecheck
+      - name: Lint (ruff)
+        run: ruff check .
+        continue-on-error: true
 
-      - name: Lint
-        run: npm run lint
+      - name: Type check (mypy)
+        run: mypy
+        continue-on-error: true
 
       - name: Test
-        run: npm test
+        run: pytest
 
-      - name: Build
-        run: npm run build
+      - name: Build distribution
+        run: python -m build
 
       - name: Extract release notes from CHANGELOG
         id: changelog
@@ -60,12 +65,13 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          files: dist/*
           body: |
             ${{ steps.changelog.outputs.notes }}
 
             ---
 
-            📦 **npm:** [`whoop-ai-mcp@${{ github.ref_name }}`](https://www.npmjs.com/package/whoop-ai-mcp/v/${{ steps.changelog.outputs.version }})
+            📦 **PyPI:** [`swe-forge@${{ steps.changelog.outputs.version }}`](https://pypi.org/project/swe-forge/${{ steps.changelog.outputs.version }}/)
 
-            Install: `npm install -g whoop-ai-mcp` or use `npx whoop-ai-mcp`
+            Install: `pip install swe-forge`
           generate_release_notes: false

@@ -33,7 +33,7 @@ and can publish tagged releases when quality gates pass.
 
 ## Demo
 
-[![Watch the demo video](https://img.youtube.com/vi/AhMBkaBqc8Y/maxresdefault.jpg)](https://youtu.be/AhMBkaBqc8Y)
+[![Watch the video](https://img.youtube.com/vi/AhMBkaBqc8Y/hqdefault.jpg)](https://youtu.be/AhMBkaBqc8Y)
 
 Watch the demo video: https://youtu.be/AhMBkaBqc8Y
 

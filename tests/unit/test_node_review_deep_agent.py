@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from flowforge.deep_agents import AgentRole
+from flowforge.deep_agents.errors import RecursionLimitExceededError
 from flowforge.deep_agents.subagents import subagents_for
 from flowforge.nodes import code_review as cr_module
 from flowforge.nodes.code_review import code_review_node
@@ -262,3 +263,42 @@ class TestDeepPathRendersMarkdown:
         text = review_files[0].read_text(encoding="utf-8")
         assert "Verdict" in text
         assert result["review_findings"][0].source_node == "code_review_node"
+
+
+class TestDeepPathLimitFallback:
+    def test_recursion_limit_returns_trace_without_raising(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("FLOWFORGE_DEEP_AGENTS", "1")
+
+        monkeypatch.setattr(cr_module, "build_deep_agent", lambda *a, **k: object())
+
+        def _raise_limit(*_a: object, **_k: object) -> dict[str, object]:
+            raise RecursionLimitExceededError(
+                "deep agent run for 'code_review_node' hit recursion limit",
+                role=AgentRole.REVIEWER,
+                node_name="code_review_node",
+                partial_trace=DeepAgentTrace(
+                    role=AgentRole.REVIEWER,
+                    messages_digest="sha256:test",
+                    tool_invocations=[],
+                ),
+            )
+
+        monkeypatch.setattr(cr_module, "run_deep_agent_bounded", _raise_limit)
+        monkeypatch.setattr(cr_module, "_create_github_issues", lambda *a, **k: None)
+
+        llm = MockLLM(responses=["unused"])
+        state = _state(str(tmp_path))
+
+        result = code_review_node(state, llm=llm)
+
+        assert result["review_findings"] == []
+        assert "code_review_node" in result["deep_agent_traces"]
+
+        review_files = list((tmp_path / "docs" / "reviews").glob("*.md"))
+        assert len(review_files) == 1
+        text = review_files[0].read_text(encoding="utf-8")
+        assert "recursion limit" in text.lower()

@@ -301,6 +301,166 @@ def test_tools_for_role_returns_basetool_instances(workdir: Path) -> None:
         assert isinstance(t, BaseTool)
 
 
+# ---------------------------------------------------------------------------
+# Consecutive-failure stop-signal (anti-loop guard)
+# ---------------------------------------------------------------------------
+
+
+def test_run_tests_stop_signal_after_consecutive_failures(
+    workdir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Block persists until workdir fingerprint changes."""
+    import json
+    from flowforge.deep_agents import factory as _fmod
+
+    # Patch the underlying tool to always fail.
+    class _FailResult:
+        returncode = 1
+        stdout = "FAIL"
+        stderr = "1 failed"
+        duration_ms = 10
+        def model_dump_json(self) -> str:
+            return json.dumps({"returncode": 1, "stdout": self.stdout,
+                               "stderr": self.stderr, "duration_ms": self.duration_ms})
+
+    monkeypatch.setattr(_fmod._ftools, "run_tests", lambda **_: _FailResult())
+
+    bound_tools = tools_for_role(AgentRole.IMPLEMENTER, workdir=workdir)
+    rt = next(t for t in bound_tools if t.name == "run_tests")
+
+    # First N calls: real failure result.
+    for _ in range(_fmod._MAX_CONSECUTIVE_FAILURES):
+        result = json.loads(rt.invoke({}))
+        assert result["returncode"] == 1
+
+    # Next call: stop-signal.
+    stop = json.loads(rt.invoke({}))
+    assert stop["returncode"] == -1
+    assert "blocked" in stop["stderr"].lower()
+    assert "before calling run_tests" in stop["stderr"]
+
+    # Without a file change, it remains blocked.
+    still_blocked = json.loads(rt.invoke({}))
+    assert still_blocked["returncode"] == -1
+
+    # Simulate a file change by advancing the fingerprint.
+    fps = iter(["a", "a", "a", "a", "b", "b"])
+    monkeypatch.setattr(_fmod, "_workdir_fingerprint", lambda _: next(fps))
+    unblocked = json.loads(rt.invoke({}))
+    assert unblocked["returncode"] == 1  # still failing, but actually ran
+
+
+def test_run_tests_resets_counter_on_success(
+    workdir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counter resets when tests pass and workdir fingerprint changes."""
+    import json
+    from flowforge.deep_agents import factory as _fmod
+
+    call_count = [0]
+    fps = iter(["a", "a", "b", "b", "c", "c"])
+
+    class _Result:
+        def __init__(self, rc: int) -> None:
+            self.returncode = rc
+            self.stdout = ""
+            self.stderr = ""
+            self.duration_ms = 10
+        def model_dump_json(self) -> str:
+            return json.dumps({"returncode": self.returncode, "stdout": "",
+                               "stderr": "", "duration_ms": 10})
+
+    def _alternating(**_: object) -> _Result:
+        call_count[0] += 1
+        # fail, fail, pass, fail, fail → should never hit block of 3
+        return _Result(0 if call_count[0] == 3 else 1)
+
+    monkeypatch.setattr(_fmod._ftools, "run_tests", _alternating)
+    monkeypatch.setattr(_fmod, "_workdir_fingerprint", lambda _: next(fps))
+
+    bound_tools = tools_for_role(AgentRole.IMPLEMENTER, workdir=workdir)
+    rt = next(t for t in bound_tools if t.name == "run_tests")
+
+    results = [json.loads(rt.invoke({})) for _ in range(5)]
+    # None of the 5 calls should have triggered the stop-signal
+    assert all(r["returncode"] != -1 for r in results)
+
+
+def test_run_tests_stop_signal_after_repeated_success_without_change(
+    workdir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated successful verifier runs with no file changes are blocked."""
+    import json
+    from flowforge.deep_agents import factory as _fmod
+
+    class _OkResult:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+        duration_ms = 10
+
+        def model_dump_json(self) -> str:
+            return json.dumps({"returncode": 0, "stdout": self.stdout,
+                               "stderr": self.stderr, "duration_ms": self.duration_ms})
+
+    monkeypatch.setattr(_fmod._ftools, "run_tests", lambda **_: _OkResult())
+    monkeypatch.setattr(_fmod, "_workdir_fingerprint", lambda _: "same")
+
+    bound_tools = tools_for_role(AgentRole.IMPLEMENTER, workdir=workdir)
+    rt = next(t for t in bound_tools if t.name == "run_tests")
+
+    for _ in range(_fmod._MAX_VERIFIER_CALLS_WITHOUT_CHANGE):
+        result = json.loads(rt.invoke({}))
+        assert result["returncode"] == 0
+
+    stop = json.loads(rt.invoke({}))
+    assert stop["returncode"] == -1
+    assert "blocked" in stop["stderr"].lower()
+
+
+def test_run_tests_guard_persists_across_wrapper_rebuild(
+    workdir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guard state survives tools_for_role rebuilds for same workdir."""
+    import json
+    from flowforge.deep_agents import factory as _fmod
+
+    # Isolate global guard for this test.
+    _fmod._VERIFIER_GUARD.clear()
+
+    class _OkResult:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+        duration_ms = 10
+
+        def model_dump_json(self) -> str:
+            return json.dumps({"returncode": 0, "stdout": self.stdout,
+                               "stderr": self.stderr, "duration_ms": self.duration_ms})
+
+    monkeypatch.setattr(_fmod._ftools, "run_tests", lambda **_: _OkResult())
+    monkeypatch.setattr(_fmod, "_workdir_fingerprint", lambda _: "same")
+
+    # First wrapper instance consumes nearly all no-change budget.
+    bound1 = tools_for_role(AgentRole.IMPLEMENTER, workdir=workdir)
+    rt1 = next(t for t in bound1 if t.name == "run_tests")
+    for _ in range(_fmod._MAX_VERIFIER_CALLS_WITHOUT_CHANGE - 1):
+        result = json.loads(rt1.invoke({}))
+        assert result["returncode"] == 0
+
+    # New wrapper instance should continue from existing guard state.
+    bound2 = tools_for_role(AgentRole.IMPLEMENTER, workdir=workdir)
+    rt2 = next(t for t in bound2 if t.name == "run_tests")
+    result = json.loads(rt2.invoke({}))
+    assert result["returncode"] == 0
+    stop = json.loads(rt2.invoke({}))
+    assert stop["returncode"] == -1
+
+
 def test_tools_for_role_workdir_must_be_path() -> None:
     with pytest.raises(TypeError):
         tools_for_role(AgentRole.IMPLEMENTER, workdir="not-a-path")  # type: ignore[arg-type]
@@ -334,3 +494,42 @@ def test_factory_signature_shape() -> None:
 def test_default_recursion_limit_is_fifty() -> None:
     # Spec §10 default is 50. Local constant is the source of truth.
     assert DEFAULT_RECURSION_LIMIT == 50  # noqa: PLR2004 - canonical spec value
+
+
+# ---------------------------------------------------------------------------
+# Skills wiring — `.github/skills/` exposed via deepagents `skills=` kwarg
+# ---------------------------------------------------------------------------
+
+
+def test_skills_are_passed_per_role(
+    fake_llm: FakeListChatModel,
+    workdir: Path,
+    capture: _Capture,
+) -> None:
+    """Each role must surface its declared skill bundle to ``create_deep_agent``.
+
+    The factory mounts ``.github/skills/`` under ``/skills/`` via a
+    :class:`CompositeBackend` and forwards a per-role ``skills=[...]``
+    list. This is what gives each node access to the matching SKILL.md
+    knowledge base (e.g. REVIEWER → code-review-and-quality).
+    """
+    build_deep_agent(role=AgentRole.REVIEWER, llm=fake_llm, workdir=workdir)
+    skills = capture.get("skills")
+    backend = capture.get("backend")
+    assert skills is not None, "skills= must be passed when bundle is present"
+    assert backend is not None, "backend= must be passed alongside skills="
+    assert "/skills/code-review-and-quality/" in skills
+
+
+def test_skills_omitted_when_bundle_missing(
+    fake_llm: FakeListChatModel,
+    workdir: Path,
+    capture: _Capture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """If ``.github/skills/`` is absent, fall back to default backend."""
+    monkeypatch.setattr(factory_module, "_SKILLS_ROOT", tmp_path / "missing")
+    build_deep_agent(role=AgentRole.REVIEWER, llm=fake_llm, workdir=workdir)
+    assert "skills" not in capture
+    assert "backend" not in capture

@@ -23,6 +23,7 @@ from flowforge.deep_agents.adapters import (
     materialize_files,
     persist_files,
 )
+from flowforge.deep_agents.errors import DeepAgentLimitError
 from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
 from flowforge.deep_agents.secret_scanner import (
     SecretFinding,
@@ -35,8 +36,10 @@ from flowforge.nodes.task_executor import execute_task
 from flowforge.state.models import (
     DeepAgentTrace,
     GraphState,
+    ImplementationPlan,
     RunStatus,
     Task,
+    TaskDefinition,
     TaskStatus,
     ToolInvocationRecord,
 )
@@ -83,18 +86,24 @@ def _execute_with_retry(task: Task, *, llm: LLMProtocol) -> TaskExecutionResult:
 def task_node(state: GraphState, *, llm: LLMProtocol) -> dict[str, Any]:
     """Execute every task in the implementation plan via the LLM.
 
-    For each task definition produced by ``plan_node``:
-      1. wraps it in a ``Task`` runtime object
-      2. calls ``execute_task`` (with up to ``MAX_TASK_ATTEMPTS`` retries on
-         FAILED) which routes to the right capability executor
-      3. writes each artifact's ``content`` to ``<workdir>/<artifact.path>``
-      4. records the populated ``Task`` (with artifacts) on ``state.tasks``
+    Two execution modes:
 
-    The returned ``state.tasks`` is what ``code_review_node``,
-    ``security_audit_node``, and ``test_engineer_node`` read to build their
-    review prompts, so populating ``artifacts`` here is what allows the gates
-    to analyze real code.
+    * **Per-task (Option A — Send fan-out):** when ``state.current_task_id``
+      is set (the conditional ``task_fanout_router`` edge sets it via
+      ``Send("task_node", {"current_task_id": ...})``), this node runs
+      exactly that one task. The graph router re-evaluates the DAG after
+      every wave so independent tasks run in parallel and dependents
+      wait for their predecessors.
+    * **Legacy (all-at-once):** when ``current_task_id`` is ``None``
+      (direct unit-test calls), iterates every task in plan order. Kept
+      for backward compatibility — the dynamic dispatcher does not use
+      this branch.
     """
+    if isinstance(state, dict):
+        state = GraphState(**state)
+    if state.current_task_id is not None:
+        return _execute_one_task(state, state.current_task_id, llm=llm)
+
     plan = state.implementation_plan
     if plan is None or not plan.dag.tasks:
         return {"tasks": []}
@@ -169,7 +178,246 @@ def _commit_artifacts(workdir: Path, paths: list[Path]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Deep Agent variant (T9, spec \u00a713.14)
+# Per-task execution (Option A — dynamic DAG dispatch via Send)
+# ---------------------------------------------------------------------------
+
+
+def _predecessor_skip_decision(
+    plan: ImplementationPlan,
+    current_tasks: list[Task],
+    task_id: str,
+) -> Task | None:
+    """If any predecessor terminated unsuccessfully, return a SKIPPED task.
+
+    A predecessor counts as a blocker when its status is FAILED, BLOCKED,
+    CANCELLED, or SKIPPED — anything that didn't reach SUCCEEDED. The
+    returned ``Task`` records which predecessors blocked the dispatch in
+    its ``error_message`` so the reviewer / triager nodes can pick it up.
+    """
+    by_id: dict[str, Task] = {t.task_id: t for t in current_tasks}
+    blockers: list[str] = []
+    for edge in plan.dag.edges:
+        if edge.to_task_id != task_id:
+            continue
+        pred = by_id.get(edge.from_task_id)
+        if pred is None:
+            continue
+        if pred.status in {
+            TaskStatus.FAILED,
+            TaskStatus.BLOCKED,
+            TaskStatus.CANCELLED,
+            TaskStatus.SKIPPED,
+        }:
+            blockers.append(edge.from_task_id)
+    if not blockers:
+        return None
+    definition = next(d for d in plan.dag.tasks if d.task_id == task_id)
+    return Task(
+        task_id=task_id,
+        definition=definition,
+        status=TaskStatus.SKIPPED,
+        artifacts=[],
+        verification_evidence=[],
+        error_message=(
+            f"skipped: predecessor task(s) {', '.join(blockers)} did not succeed"
+        ),
+        idempotency_key=None,
+    )
+
+
+def _execute_one_task(
+    state: GraphState,
+    task_id: str,
+    *,
+    llm: LLMProtocol,
+) -> dict[str, Any]:
+    """Execute a single task identified by ``task_id``.
+
+    Used by the dynamic ``task_fanout_router`` Send fan-out so each
+    runnable task becomes its own ``task_node`` invocation. Returns a
+    state delta containing exactly one entry in ``tasks``; the
+    ``_merge_tasks`` reducer integrates it into the parent state.
+    """
+    plan = state.implementation_plan
+    if plan is None:
+        return {"tasks": []}
+
+    definition = next(
+        (d for d in plan.dag.tasks if d.task_id == task_id),
+        None,
+    )
+    if definition is None:
+        return {"tasks": []}
+
+    skipped = _predecessor_skip_decision(plan, state.tasks, task_id)
+    if skipped is not None:
+        return {"tasks": [skipped]}
+
+    if resolve_deep_agents_enabled():
+        deep_result = _execute_one_via_deep(definition, state, llm)
+        if deep_result is not None:
+            return deep_result
+        # fall through to legacy single-task executor
+
+    return _execute_one_via_legacy(definition, state, llm=llm)
+
+
+def _execute_one_via_legacy(
+    definition: TaskDefinition,
+    state: GraphState,
+    *,
+    llm: LLMProtocol,
+) -> dict[str, Any]:
+    """Single-task version of the legacy in-process executor."""
+    workdir = get_workdir(state)
+    task = Task(task_id=definition.task_id, definition=definition)
+    result = _execute_with_retry(task, llm=llm)
+
+    written_paths: list[Path] = []
+    for artifact in result.artifacts:
+        if not artifact.content:
+            continue
+        target = (workdir / artifact.path).resolve()
+        try:
+            target.relative_to(workdir.resolve())
+        except ValueError:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(artifact.content)
+        written_paths.append(target)
+    if written_paths:
+        _commit_artifacts(workdir, written_paths)
+
+    completed = Task(
+        task_id=task.task_id,
+        definition=task.definition,
+        status=result.status,
+        artifacts=list(result.artifacts),
+        verification_evidence=list(result.verification_evidence),
+        error_message=result.error_message,
+        idempotency_key=result.idempotency_key,
+    )
+    return {"tasks": [completed]}
+
+
+def _execute_one_via_deep(
+    definition: TaskDefinition,
+    state: GraphState,
+    llm: LLMProtocol,
+) -> dict[str, Any] | None:
+    """Single-task version of the deep-agent executor.
+
+    Returns ``None`` when the agent produced no usable VFS output, so
+    the caller can fall back to the legacy executor.
+    """
+    workdir = get_workdir(state)
+    seed_files = materialize_files(state)
+    graph = build_deep_agent(
+        role=AgentRole.IMPLEMENTER,
+        llm=cast("BaseChatModel", llm),
+        workdir=workdir,
+    )
+    payload: dict[str, Any] = {
+        "messages": [
+            {"role": "user", "content": _build_task_prompt(definition)},
+        ],
+        "files": dict(seed_files),
+    }
+    invocations: list[ToolInvocationRecord] = []
+    try:
+        result = run_deep_agent_bounded(
+            graph,
+            payload,
+            role=AgentRole.IMPLEMENTER,
+            node_name="task_node",
+            invocation_sink=invocations,
+        )
+    except DeepAgentLimitError as exc:
+        failed = Task(
+            task_id=definition.task_id,
+            definition=definition,
+            status=TaskStatus.FAILED,
+            artifacts=[],
+            verification_evidence=[],
+            error_message=str(exc),
+            idempotency_key=None,
+        )
+        return {
+            "tasks": [failed],
+            "deep_agent_traces": {f"task_node:{definition.task_id}": exc.partial_trace},
+        }
+
+    result_files = result.get("files") if isinstance(result, dict) else None
+    if not isinstance(result_files, dict) or not any(
+        isinstance(k, str)
+        and k.startswith("vfs:/")
+        and not k[len("vfs:/"):].startswith(
+            ("findings/", "context/", "subagent/"),
+        )
+        for k in result_files
+    ):
+        return None
+
+    raw_messages = result.get("messages")
+    messages = (
+        [m for m in raw_messages if isinstance(m, dict)]
+        if isinstance(raw_messages, list)
+        else []
+    )
+    vfs_keys = sorted(k for k in result_files if isinstance(k, str))
+    trace = DeepAgentTrace(
+        role=AgentRole.IMPLEMENTER,
+        messages_digest=DeepAgentTrace.digest_messages(messages),
+        vfs_keys=vfs_keys,
+        tool_invocations=invocations,
+    )
+
+    findings = _scan_files_for_secrets(
+        {k: v for k, v in result_files.items() if isinstance(v, str)},
+        workdir,
+    )
+    if has_blocking_secret(findings):
+        offending = next(f for f in findings if f.severity.value == "high")
+        blocked = Task(
+            task_id=definition.task_id,
+            definition=definition,
+            status=TaskStatus.BLOCKED,
+            artifacts=[],
+            verification_evidence=[],
+            error_message=(
+                f"secret_scanner blocked run: {offending.pattern_name} "
+                f"on line {offending.line}"
+            ),
+            idempotency_key=None,
+        )
+        return {
+            "run_status": RunStatus.BLOCKED,
+            "tasks": [blocked],
+            "deep_agent_traces": {f"task_node:{definition.task_id}": trace},
+        }
+
+    artifacts = persist_files(result, workdir)
+    written = [(workdir / a.path).resolve() for a in artifacts]
+    if written:
+        _commit_artifacts(workdir, written)
+    evidence = _extract_verification_evidence(result)
+    completed = Task(
+        task_id=definition.task_id,
+        definition=definition,
+        status=TaskStatus.SUCCEEDED,
+        artifacts=list(artifacts),
+        verification_evidence=evidence,
+        error_message=None,
+        idempotency_key=None,
+    )
+    return {
+        "tasks": [completed],
+        "deep_agent_traces": {f"task_node:{definition.task_id}": trace},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Deep Agent variant (T9, spec §13.14) — legacy all-at-once path
 # ---------------------------------------------------------------------------
 
 

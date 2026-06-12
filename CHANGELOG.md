@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-06-12
+
+### Fixed
+
+- **Deep-agent recursion no longer aborts the run.** When a deep-agent
+  bounded executor hits its recursion limit inside `task_node` or
+  `code_review_node`, the node now reports a structured failure
+  (failed task + `DeepAgentTrace`) and lets the pipeline continue
+  through the remaining quality gates and `ship_node`, instead of
+  raising `RecursionLimitExceededError` and crashing the whole graph.
+- **Verifier-loop guard is now persistent.** Anti-loop counters for
+  `run_tests` / `run_lint` / `run_typecheck` survive deep-agent /
+  tool-wrapper rebuilds (keyed by `workdir + tool`), so repeated
+  successful checks against an unchanged workdir are blocked across
+  fan-out waves rather than resetting on every wrapper rebuild.
+- Workdir-fingerprint change detection added to the verifier guard;
+  no-change repeated calls trip the threshold without needing a hard
+  recursion limit.
+
+### Added
+
+- Regression tests in `tests/deep_agents/test_factory.py`,
+  `tests/unit/test_task_runner_per_task.py`, and
+  `tests/unit/test_node_review_deep_agent.py` covering persistent
+  guard state and deep-agent recursion fallback paths.
+
 ## [0.2.0] - 2026-06-12
 
 ### Added

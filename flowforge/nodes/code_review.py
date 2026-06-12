@@ -24,6 +24,7 @@ from flowforge.deep_agents.adapters import (
     extract_findings,
     materialize_files,
 )
+from flowforge.deep_agents.errors import DeepAgentLimitError
 from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
 from flowforge.nodes._workspace import get_workdir
 from flowforge.state.models import (
@@ -75,9 +76,42 @@ def _build_prompt(state: GraphState) -> str:
             if never:
                 spec_context += f"- **Never do**: {'; '.join(never[:3])}\n"
 
+    # Prior checkpoint awareness — list any review files already in the
+    # repo so the model can flag carry-over items it sees recurring.
+    prior_reviews_section = ""
+    workdir = get_workdir(state) if state.workdir else None
+    if workdir is not None:
+        review_dir = workdir / "docs" / "reviews"
+        if review_dir.is_dir():
+            prior = sorted(review_dir.glob("code-review-checkpoint-*.md"))
+            if prior:
+                names = ", ".join(p.name for p in prior[-5:])
+                prior_reviews_section = (
+                    f"\n## Prior Review Checkpoints\n"
+                    f"The repo already contains {len(prior)} review checkpoint(s): {names}. "
+                    f"Read the most recent one(s) and re-flag any unresolved Critical/High items "
+                    f"that still apply to the current artifacts.\n"
+                )
+
     return f"""You are a Staff Engineer conducting a thorough code review. Evaluate the
 proposed changes across five dimensions, provide actionable categorized feedback,
 and flag anything that should block merge.
+
+## Process
+
+1. **Gather context first.** Read the spec, the artifacts, and any prior
+   review checkpoints listed below. If you have tools available
+   (`run_lint`, `run_typecheck`, `git_status`, `git_diff`, `read_file`,
+   `list_files`), use them BEFORE writing findings. Quote the actual
+   tool output in your finding descriptions when it supports a claim.
+2. **Review the tests first** — they reveal intent and coverage. Missing
+   or shallow tests are themselves a finding.
+3. **Apply the five-axis rubric below.** Every finding must map to
+   exactly one dimension.
+4. **Decide a verdict.** Approve when the change improves overall code
+   health, even if not perfect. Block (request_changes) only when a
+   Critical issue is present or High issues are numerous enough that
+   merging would degrade the codebase.
 
 ## Methodology: Five-Axis Code Review
 
@@ -88,18 +122,23 @@ Evaluate EVERY artifact across these five dimensions:
 - Are edge cases handled (null, empty, boundary values, error paths)?
 - Are there race conditions, off-by-one errors, or state inconsistencies?
 - Do tests actually verify the behavior? Are they testing the right things?
+- Is there orphaned / dead code introduced or left behind by this change?
 
 ### 2. Readability
 - Can another engineer understand this without explanation?
 - Are names descriptive and consistent with project conventions?
 - Is the control flow straightforward (no deeply nested logic)?
+- Is related code grouped with clear module boundaries?
 - Could this be done in fewer lines? Are abstractions earning their complexity?
 
 ### 3. Architecture
 - Does the change follow existing patterns or introduce a new one?
+  If new, is the new pattern justified and documented?
 - Are module boundaries maintained? Any circular dependencies?
 - Is the abstraction level appropriate (not over-engineered, not too coupled)?
 - Dependencies flowing in the right direction?
+- Before adding any new dependency: is it justified vs. existing stack?
+  Maintenance, size, CVEs, license?
 
 ### 4. Security
 - Is user input validated and sanitized at system boundaries?
@@ -113,7 +152,7 @@ Evaluate EVERY artifact across these five dimensions:
 - Any synchronous operations that should be async?
 - Any missing pagination on list endpoints?
 - Any unnecessary re-computation?
-{spec_context}
+{spec_context}{prior_reviews_section}
 ## Artifacts to Review
 
 {artifacts_text}
@@ -127,7 +166,9 @@ Categorize each finding as:
 - **low** — Minor suggestion (optional refactoring)
 - **info** — Observation, no action needed
 
-Also include what's done well (at least one positive observation).
+Also include what's done well (at least one positive observation) and a
+short verification story stating which checks you ran (or could not run)
+and what they showed.
 
 Respond with a JSON object:
 
@@ -135,6 +176,12 @@ Respond with a JSON object:
   "verdict": "approve" | "request_changes",
   "summary": "1-2 sentences summarizing the overall assessment",
   "done_well": ["Specific positive observation 1", "..."],
+  "verification_story": {{
+    "tests_run": "pass | fail | not_run — short note",
+    "lint_run": "pass | fail | not_run — short note",
+    "typecheck_run": "pass | fail | not_run — short note",
+    "prior_review_carryover": "list of unresolved items from prior checkpoints, or 'none'"
+  }},
   "findings": [
     {{
       "finding_id": "cr-1",
@@ -151,10 +198,11 @@ Respond with a JSON object:
 }}
 
 ## Rules
-- Every Critical and Important finding MUST include a specific fix recommendation
+- Every Critical and High finding MUST include a specific fix recommendation
 - Don't approve code with Critical issues
 - Be specific: include file paths and line numbers where possible
-- Acknowledge what's done well
+- Quote tool output (lint/typecheck/diff) in descriptions when it backs a claim
+- Acknowledge what's done well (at least one item)
 - If uncertain, say so and suggest investigation rather than guessing
 
 Respond ONLY with the JSON object. No markdown fences, no explanation."""
@@ -281,6 +329,18 @@ def _render_review_markdown(
     for item in metadata.get("done_well", ["Code follows project conventions."]):
         lines.append(f"- {item}")
     lines.append("")
+
+    # Verification Story
+    vs = metadata.get("verification_story") or {}
+    if vs:
+        lines.append("## Verification Story\n")
+        lines.append("| Check | Result |")
+        lines.append("|-------|--------|")
+        for key in ("tests_run", "lint_run", "typecheck_run", "prior_review_carryover"):
+            val = vs.get(key)
+            if val:
+                lines.append(f"| {key.replace('_', ' ')} | {val} |")
+        lines.append("")
 
     # Action items table
     lines.append("## Action Items\n")
@@ -434,43 +494,74 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         llm=cast("BaseChatModel", llm),
         workdir=workdir,
     )
+    rubric = _build_prompt(state)
+    user_message = (
+        "Conduct a five-axis code review using the rubric below. Use your"
+        " tools (run_lint, run_typecheck, git_status, git_diff) to gather"
+        " evidence before writing findings. After producing the JSON,"
+        " also save it verbatim to vfs:/findings/review.json and write a"
+        " markdown report at vfs:/docs/reviews/code-review.md.\n\n"
+        + rubric
+    )
     payload: dict[str, Any] = {
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    "Review the task artifacts in your VFS using the"
-                    " five-axis methodology. Emit findings to"
-                    " vfs:/findings/review.json and a markdown report"
-                    " to vfs:/docs/reviews/code-review.md."
-                ),
-            },
-        ],
+        "messages": [{"role": "user", "content": user_message}],
         "files": files,
     }
     invocations: list[ToolInvocationRecord] = []
-    result = run_deep_agent_bounded(
-        graph,
-        payload,
-        role=AgentRole.REVIEWER,
-        node_name="code_review_node",
-        invocation_sink=invocations,
-    )
+    try:
+        result = run_deep_agent_bounded(
+            graph,
+            payload,
+            role=AgentRole.REVIEWER,
+            node_name="code_review_node",
+            invocation_sink=invocations,
+        )
+    except DeepAgentLimitError as exc:
+        metadata = {
+            "verdict": "request_changes",
+            "summary": str(exc),
+            "done_well": [],
+            "verification_story": {},
+        }
+        _commit_review_to_repo([], metadata, state)
+        return {
+            "review_findings": [],
+            "deep_agent_traces": {"code_review_node": exc.partial_trace},
+        }
 
     findings = [
         f.model_copy(update={"source_node": "code_review_node"})
         for f in extract_findings(result)
     ]
 
-    raw_files = result.get("files")
-    vfs_keys: list[str] = (
-        sorted(k for k in raw_files if isinstance(k, str))
-        if isinstance(raw_files, dict) else []
-    )
+    # Try to recover verdict / summary / done_well / verification_story
+    # from the agent's final assistant message; fall back to defaults.
+    metadata: dict[str, Any] = {
+        "verdict": "request_changes" if findings else "approve",
+        "summary": "Deep-agent review run.",
+        "done_well": [],
+        "verification_story": {},
+    }
     raw_messages = result.get("messages")
     messages: list[dict[str, object]] = (
         [m for m in raw_messages if isinstance(m, dict)]
         if isinstance(raw_messages, list) else []
+    )
+    for m in reversed(messages):
+        content = m.get("content")
+        if not isinstance(content, str):
+            continue
+        try:
+            _, parsed_meta = _parse_findings(content, "code_review_node")
+        except (json.JSONDecodeError, KeyError, ValueError):
+            continue
+        metadata.update(parsed_meta)
+        break
+
+    raw_files = result.get("files")
+    vfs_keys: list[str] = (
+        sorted(k for k in raw_files if isinstance(k, str))
+        if isinstance(raw_files, dict) else []
     )
     trace = DeepAgentTrace(
         role=AgentRole.REVIEWER,
@@ -479,11 +570,6 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         tool_invocations=invocations,
     )
 
-    metadata: dict[str, Any] = {
-        "verdict": "request_changes" if findings else "approve",
-        "summary": "Deep-agent review run.",
-        "done_well": [],
-    }
     _commit_review_to_repo(findings, metadata, state)
     _create_github_issues(findings, state)
 

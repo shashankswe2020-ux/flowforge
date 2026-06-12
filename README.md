@@ -10,6 +10,10 @@ Multi-agent LangGraph framework for autonomous software development.
 filed issues for every finding, opens a pull request on a feature
 branch, and pushes a tagged release when the quality gates pass.
 
+![FlowForge LangGraph pipeline](docs/screenshots/langgraph-pipeline.png)
+
+*Live view of the FlowForge graph executing in LangGraph Studio.*
+
 > The PyPI distribution is `swe-forge`; the Python module is `flowforge`.
 > Use the `swe-forge` command after installing.
 
@@ -50,9 +54,23 @@ repo itself is never written to.
 - Python ≥ 3.12
 - `gh` CLI authenticated (`gh auth login`) — for repo creation + issue filing
 - One provider credential, depending on `swe-forge setup` choice:
-  - **GitHub Copilot** (default): `gh auth token` is used — no extra setup
+  - **GitHub Copilot** (default): one-time device-flow login via `swe-forge copilot-login`
   - **OpenAI / Codex**: `export OPENAI_API_KEY=...`
   - **Claude Code**: `export ANTHROPIC_API_KEY=...`
+
+### `swe-forge copilot-login` — authorize your Copilot subscription
+
+```
+$ swe-forge copilot-login
+  Open https://github.com/login/device in any browser and enter code: ABCD-1234
+  Waiting for authorization...
+✅ Copilot OAuth token saved to ~/.flowforge/copilot-oauth.json (mode 0600)
+```
+
+Uses GitHub device-flow against the official Copilot OAuth client. The
+resulting token is cached at `~/.flowforge/copilot-oauth.json` (mode
+`0600`) and reused by every subsequent run. Re-run `swe-forge
+copilot-login` to refresh.
 
 ### `swe-forge setup` — interactive walkthrough
 
@@ -233,6 +251,40 @@ START
 All file writes, git commits, `gh` issue/label creation, and the
 final push happen with `cwd=workdir`, so the source repo of
 `swe-forge` is never touched.
+
+## Recent successful run
+
+Fresh end-to-end run on `v0.2.1` (`build tic-tac-toe web app`,
+`gpt-4.1` via Copilot, `--skip-github --no-studio`):
+
+```
+  ━━━ Node: clarification_node ━━━     ✓ done in 18.5s
+  ━━━ Node: spec_node ━━━               ✓ done in 34.5s
+     · 8 acceptance criteria | stack: HTML5, CSS3, JavaScript (ES2020+)
+  ━━━ Node: plan_node ━━━               ✓ done in 0.0s
+     · 3 phases | 7 tasks | 7 deps
+  ━━━ Node: task_fanout_router ━━━      ✓ done in 39.1s
+     + 14 artifacts (package.json, vite.config.js, src/main.js, …)
+  ━━━ Node: task_node ━━━               · succeeded=1 | 12 artifacts
+  ━━━ Node: task_fanout_router ━━━      ✓ done in 66.7s
+  ━━━ Node: task_node ━━━               · failed=1   (graceful — no abort)
+  ━━━ Node: task_node × 5 ━━━           · skipped=1 (dependents)
+  ━━━ Node: quality_gate_join ━━━       ✓ done in 11.4s
+  ━━━ Node: test_engineer_node ━━━      · 0 findings (13.8s)
+  ━━━ Node: security_audit_node ━━━     · 0 findings (0.9s)
+  ━━━ Node: code_review_node ━━━        · 0 findings (0.0s)
+  ━━━ Node: quality_gate_merge ━━━      ✓ done
+  ━━━ Node: issue_orchestrator_node ━━━ ✓ done in 10.2s
+  ━━━ Node: ship_node ━━━               · shipped=True | commit=d72862dd
+
+======================================================================
+PIPELINE COMPLETE — ✅ Success
+======================================================================
+```
+
+Deep-agent recursion limits in `task_node` and `code_review_node`
+now degrade gracefully (failed task + trace) instead of aborting the
+entire run. See `CHANGELOG.md` `[0.2.1]` for details.
 
 ## Development
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "swe-forge"
-version = "0.1.90"
+version = "0.2.1"
 description = "Multi-agent LangGraph framework for autonomous software development"
 requires-python = ">=3.12"
 license = "MIT"
@@ -40,6 +40,9 @@ swe-forge = "flowforge.cli.main:cli"
 where = ["."]
 include = ["flowforge*"]
 exclude = ["tests*", "scripts*", "docs*"]
+
+[tool.setuptools.package-data]
+"flowforge.deep_agents" = ["skills/**/SKILL.md", "instructions/*.md"]
 
 [project.optional-dependencies]
 dev = [

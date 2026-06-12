@@ -90,4 +90,4 @@ def test_safe_path_rejects_escape() -> None:
     from flowforge.deep_agents import tools
 
     with pytest.raises(tools.PathTraversalError):
-        tools._safe_path(Path("/tmp"), "/etc/passwd")
+        tools._safe_path(Path("/tmp"), "/foo/../../etc/passwd")

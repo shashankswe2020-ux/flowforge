@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 from flowforge.config.deep_agents import resolve_deep_agents_enabled
 from flowforge.deep_agents import AgentRole
@@ -44,6 +44,10 @@ class LLMProtocol(Protocol):
     def invoke(self, prompt: str) -> Any: ...  # noqa: ANN401
 
 
+_PROMPT_ARTIFACT_CHAR_LIMIT: Final[int] = 3_000
+"""Per-artifact content limit when embedding in a prompt string."""
+
+
 def _build_prompt(state: GraphState) -> str:
     """Build security audit prompt following security-auditor agent methodology."""
     # Gather artifact details including content
@@ -53,7 +57,10 @@ def _build_prompt(state: GraphState) -> str:
             for art in task.artifacts:
                 section = f"### {art.path} ({art.artifact_type})"
                 if hasattr(art, "content") and art.content:
-                    section += f"\n```\n{art.content}\n```"
+                    body = art.content
+                    if len(body) > _PROMPT_ARTIFACT_CHAR_LIMIT:
+                        body = body[:_PROMPT_ARTIFACT_CHAR_LIMIT] + f"\n... [{len(art.content) - _PROMPT_ARTIFACT_CHAR_LIMIT} chars truncated]"
+                    section += f"\n```\n{body}\n```"
                 else:
                     section += f"\n  fingerprint: {art.fingerprint}"
                 artifact_sections.append(section)
@@ -73,9 +80,39 @@ def _build_prompt(state: GraphState) -> str:
             if never:
                 security_context += f"\n## Hard Prohibitions\n{chr(10).join(f'- {n}' for n in never)}\n"
 
+    # Prior audit awareness
+    prior_audits_section = ""
+    workdir = get_workdir(state) if state.workdir else None
+    if workdir is not None:
+        audit_dir = workdir / "docs" / "security-audits"
+        if audit_dir.is_dir():
+            prior = sorted(audit_dir.glob("security-audit-*.md"))
+            if prior:
+                names = ", ".join(p.name for p in prior[-5:])
+                prior_audits_section = (
+                    f"\n## Prior Audit Reports\n"
+                    f"The repo contains {len(prior)} previous audit(s): {names}. "
+                    f"Read the most recent one(s) and re-flag any unresolved Critical/High items "
+                    f"that still apply.\n"
+                )
+
     return f"""You are an experienced Security Engineer conducting a security audit. Focus on
 practical, exploitable vulnerabilities rather than theoretical risks. Your goal is to
 identify real attack vectors and provide specific, actionable fixes.
+
+## Process
+
+1. **Gather context first.** Read the spec, the artifacts, and any prior
+   audit reports listed below. If you have tools available
+   (`git_diff`, `git_status`, `web_search`, `read_file`, `list_files`),
+   use them to inspect the change set, scan for secret patterns
+   (`gh[ops]_`, `sk-`, `AKIA`, `-----BEGIN.*PRIVATE KEY-----`), and
+   verify dependency hygiene before writing findings.
+2. **Map every finding to OWASP A01–A10** by populating `owasp_category`.
+   If a finding doesn't fit a Top-10 category, use `"none"`.
+3. **Be exploit-focused.** Theoretical risks belong in `info`. Critical
+   and High findings must include a concrete proof-of-concept (request,
+   payload, or attack chain).
 
 ## Methodology: Five-Dimension Security Audit
 
@@ -100,9 +137,11 @@ Evaluate ALL artifacts across these five dimensions:
 ### 3. Data Protection
 - Are secrets in environment variables (not hardcoded in source)?
 - Are sensitive fields excluded from API responses and logs?
+- Are `console.log` / `print` / logger calls scrubbed of tokens, PII, headers?
 - Is data encrypted in transit (HTTPS/TLS)?
 - Is PII minimized and handled per regulations?
 - Are credentials or tokens stored with restricted file permissions?
+- Does `.gitignore` cover `.env`, key files, and credential dirs?
 
 ### 4. Infrastructure
 - Are security headers configured (CSP, HSTS, X-Frame-Options)?
@@ -115,7 +154,9 @@ Evaluate ALL artifacts across these five dimensions:
 - Are API keys and tokens stored securely?
 - Are webhook payloads verified (signature validation)?
 - Are OAuth flows using state parameters and PKCE?
-- Are third-party dependencies audited for known CVEs?
+- Are third-party dependencies audited for known CVEs (`npm audit`,
+  `pip-audit`)? Surface unreachable vulnerable code as `info`, but
+  always flag exploitable paths as Critical/High.
 
 ## OWASP Top 10 Checklist (minimum baseline)
 - A01: Broken Access Control
@@ -123,24 +164,28 @@ Evaluate ALL artifacts across these five dimensions:
 - A03: Injection
 - A04: Insecure Design
 - A05: Security Misconfiguration
-- A06: Vulnerable Components
-- A07: Authentication Failures
-- A08: Data Integrity Failures
-- A09: Logging & Monitoring Failures
+- A06: Vulnerable & Outdated Components
+- A07: Identification & Authentication Failures
+- A08: Software & Data Integrity Failures
+- A09: Security Logging & Monitoring Failures
 - A10: SSRF
-{security_context}
+
+## Severity → Action Timeline
+- **critical** — Exploitable remotely, leads to data breach or full
+  compromise. Required action: **Fix immediately, block release.**
+- **high** — Exploitable with some conditions, significant data
+  exposure. Required action: **Fix before release.**
+- **medium** — Limited impact or requires authenticated access.
+  Required action: **Fix in current sprint.**
+- **low** — Theoretical risk or defense-in-depth improvement. Required
+  action: **Schedule for next sprint.**
+- **info** — Best practice recommendation, no current risk.
+{security_context}{prior_audits_section}
 ## Artifacts to Audit
 
 {artifacts_text}
 
 ## Expected Output
-
-Classify each finding by severity:
-- **critical** — Exploitable remotely, leads to data breach or full compromise. Fix immediately.
-- **high** — Exploitable with some conditions, significant data exposure. Fix before release.
-- **medium** — Limited impact or requires authenticated access. Fix in current sprint.
-- **low** — Theoretical risk or defense-in-depth improvement. Schedule for next sprint.
-- **info** — Best practice recommendation, no current risk.
 
 Respond with a JSON object:
 
@@ -153,13 +198,15 @@ Respond with a JSON object:
       "severity": "critical" | "high" | "medium" | "low" | "info",
       "confidence": 0.9,
       "dimension": "input_handling" | "auth" | "data_protection" | "infrastructure" | "third_party",
+      "owasp_category": "A01" | "A02" | "A03" | "A04" | "A05" | "A06" | "A07" | "A08" | "A09" | "A10" | "none",
       "title": "Short actionable title",
       "description": "What the vulnerability is and why it matters",
       "impact": "What an attacker could do if this is exploited",
       "file_path": "path/to/file.ext",
       "line_range": [start_line, end_line],
-      "proof_of_concept": "How to exploit this (for critical/high)",
-      "suggestion": "Specific fix with code example"
+      "proof_of_concept": "How to exploit this (REQUIRED for critical/high)",
+      "suggestion": "Specific fix with code example",
+      "required_action": "Fix immediately | Fix before release | Fix in current sprint | Schedule for next sprint"
     }}
   ]
 }}
@@ -167,9 +214,9 @@ Respond with a JSON object:
 ## Rules
 - Focus on EXPLOITABLE vulnerabilities, not theoretical risks
 - Every finding MUST include a specific, actionable fix recommendation
-- Provide proof of concept for Critical/High findings
-- Acknowledge good security practices (positive_observations)
-- Check OWASP Top 10 as minimum baseline
+- Critical/High findings MUST include a concrete proof_of_concept
+- Every finding MUST set `owasp_category` (use `"none"` only if truly out of scope)
+- Acknowledge good security practices (positive_observations) — at least one
 - Never suggest disabling security controls as a "fix"
 
 Respond ONLY with the JSON object. No markdown fences, no explanation."""
@@ -434,18 +481,19 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         llm=cast("BaseChatModel", llm),
         workdir=workdir,
     )
+    rubric = _build_prompt(state)
+    user_message = (
+        "Conduct a five-dimension security audit using the rubric below."
+        " Use your tools (`git_diff`, `web_search`, `read_file`,"
+        " `list_files`) to gather evidence — inspect the diff, scan for"
+        " secret patterns, and check dependency hygiene before writing"
+        " findings. After producing the JSON, also save it verbatim to"
+        " vfs:/findings/security.json and write a markdown report at"
+        " vfs:/docs/security-audits/security-audit.md.\n\n"
+        + rubric
+    )
     payload: dict[str, Any] = {
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    "Audit the task artifacts in your VFS for exploitable"
-                    " vulnerabilities. Emit findings to"
-                    " vfs:/findings/security.json and a markdown report"
-                    " to vfs:/docs/security-audits/security-audit.md."
-                ),
-            },
-        ],
+        "messages": [{"role": "user", "content": user_message}],
         "files": files,
     }
     invocations: list[ToolInvocationRecord] = []
@@ -462,15 +510,29 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         for f in extract_findings(result)
     ]
 
-    raw_files = result.get("files")
-    vfs_keys: list[str] = (
-        sorted(k for k in raw_files if isinstance(k, str))
-        if isinstance(raw_files, dict) else []
-    )
+    # Recover summary / positive_observations from the agent's final
+    # assistant message; fall back to defaults if not parseable.
+    metadata: dict[str, Any] = {"summary": "", "positive_observations": []}
     raw_messages = result.get("messages")
     messages: list[dict[str, object]] = (
         [m for m in raw_messages if isinstance(m, dict)]
         if isinstance(raw_messages, list) else []
+    )
+    for m in reversed(messages):
+        content = m.get("content")
+        if not isinstance(content, str):
+            continue
+        try:
+            _, parsed_meta = _parse_findings(content)
+        except (json.JSONDecodeError, KeyError, ValueError):
+            continue
+        metadata.update(parsed_meta)
+        break
+
+    raw_files = result.get("files")
+    vfs_keys: list[str] = (
+        sorted(k for k in raw_files if isinstance(k, str))
+        if isinstance(raw_files, dict) else []
     )
     trace = DeepAgentTrace(
         role=AgentRole.AUDITOR,
@@ -479,7 +541,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         tool_invocations=invocations,
     )
 
-    _commit_audit_to_repo(findings, {"summary": "", "positive_observations": []}, state)
+    _commit_audit_to_repo(findings, metadata, state)
     _create_github_issues(findings, state)
 
     return {

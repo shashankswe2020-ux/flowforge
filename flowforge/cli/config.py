@@ -21,7 +21,7 @@ class FlowForgeConfig:
 
     provider: str = "copilot"  # copilot | codex | claude_code
     model: str = "gpt-4o-mini"
-    api_base: str = "https://models.inference.ai.azure.com"
+    api_base: str = "https://api.githubcopilot.com"
     temperature: float = 0.0
     max_tokens: int = 4096
     default_private: bool = True

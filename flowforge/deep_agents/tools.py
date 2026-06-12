@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess  # noqa: S404 - shell=False enforced everywhere below
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -98,7 +99,14 @@ def _safe_path(workdir: Path, candidate: str | Path) -> Path:
 
     candidate_path = Path(candidate)
     if candidate_path.is_absolute():
-        raise PathTraversalError(f"absolute path not allowed: {candidate}")
+        # LLMs often emit '/tests/foo.py' meaning 'tests/foo.py'. Coerce
+        # absolute paths without '..' segments to relative; the post-join
+        # relative_to() check below still blocks symlink/'..' escapes.
+        if ".." in candidate_path.parts:
+            raise PathTraversalError(f"absolute path not allowed: {candidate}")
+        candidate_path = (
+            Path(*candidate_path.parts[1:]) if len(candidate_path.parts) > 1 else Path()
+        )
 
     combined = workdir_resolved / candidate_path
     try:
@@ -245,7 +253,18 @@ def _filter_subprocess_env(argv: list[str]) -> dict[str, str]:
         allowed.extend(_GIT_ENV_KEYS)
     if program == "gh":
         allowed.extend(_GH_ENV_KEYS)
-    return {k: os.environ[k] for k in allowed if k in os.environ}
+    env = {k: os.environ[k] for k in allowed if k in os.environ}
+    # Ensure the active interpreter's bin/ is on PATH so tools installed
+    # in a venv (pytest, ruff, mypy) are findable even when the parent
+    # process was launched without `activate`.
+    venv_bin = str(Path(sys.executable).parent)
+    existing = env.get("PATH", "")
+    if venv_bin and venv_bin not in existing.split(os.pathsep):
+        env["PATH"] = venv_bin + (os.pathsep + existing if existing else "")
+    if program == "npm":
+        # Prevent Jest/Vitest watch-mode hangs in non-interactive agent runs.
+        env["CI"] = "1"
+    return env
 
 
 def _resolve_subprocess_timeout() -> float:
@@ -305,14 +324,28 @@ class RunTestsArgs(_StrictModel):
 
 
 def run_tests(*, workdir: Path, path: str | None = None) -> CommandResult:
-    """Run ``pytest -q`` (optionally scoped to ``path``) inside ``workdir``."""
+    """Run the workdir's test suite (pytest by default, ``npm test`` for JS)."""
     args = RunTestsArgs(path=path)
-    argv: list[str] = ["pytest", "-q"]
-    if args.path is not None:
-        # _safe_path raises PathTraversalError on escape.
-        _safe_path(workdir, args.path)
-        argv.append(args.path)
+    argv: list[str]
+    if _is_js_project(workdir):
+        argv = ["npm", "test"]
+        if args.path is not None:
+            _safe_path(workdir, args.path)
+            argv.extend(["--", args.path])
+    else:
+        argv = ["pytest", "-q"]
+        if args.path is not None:
+            _safe_path(workdir, args.path)
+            argv.append(args.path)
     return _telemetry("run_tests", lambda: _run_subprocess(argv, workdir=workdir))
+
+
+def _is_js_project(workdir: Path) -> bool:
+    """True iff workdir looks like a JS/TS project and not a Python one."""
+    py_markers = ("pyproject.toml", "setup.py", "setup.cfg", "pytest.ini", "tox.ini")
+    if any((workdir / m).exists() for m in py_markers):
+        return False
+    return (workdir / "package.json").exists()
 
 
 def run_lint(*, workdir: Path) -> CommandResult:
@@ -475,15 +508,44 @@ _WEB_ENV_FLAG = "FLOWFORGE_ALLOW_WEB"
 def web_search(*, query: str, max_results: int = 5) -> WebSearchResult:
     """Optional web search, gated behind the ``FLOWFORGE_ALLOW_WEB`` env var.
 
-    Without a configured backend, returns an empty result list. Networked
-    backends register themselves by replacing this function in T4+.
+    Uses DuckDuckGo (no API key required) when the flag is set. Falls back
+    to a single synthetic stop-signal item if the ddgs package is missing or
+    raises an exception, so the model doesn't loop retrying empty results.
     """
     args = WebSearchArgs(query=query, max_results=max_results)
     if os.environ.get(_WEB_ENV_FLAG) != "1":
         raise ToolNotAllowedError(tool_id="web_search")
 
     def _invoke() -> WebSearchResult:
-        return WebSearchResult(query=args.query, results=[])
+        try:
+            from ddgs import DDGS  # type: ignore[import-untyped]
+
+            with DDGS() as ddgs:
+                hits = ddgs.text(args.query, max_results=args.max_results)
+            items = [
+                WebSearchResultItem(
+                    title=h.get("title", ""),
+                    url=h.get("href", ""),
+                    snippet=h.get("body", ""),
+                )
+                for h in (hits or [])
+            ]
+            return WebSearchResult(query=args.query, results=items)
+        except Exception as exc:  # noqa: BLE001 — surface as stop-signal
+            _log.warning("web_search backend error: %s", exc)
+            return WebSearchResult(
+                query=args.query,
+                results=[
+                    WebSearchResultItem(
+                        title="web_search temporarily unavailable",
+                        url="about:blank",
+                        snippet=(
+                            f"Search failed ({exc}). "
+                            "Do not retry; proceed with your existing context."
+                        ),
+                    ),
+                ],
+            )
 
     return _telemetry("web_search", _invoke)
 
@@ -528,12 +590,26 @@ def mcp_invoke(*, tool: str, arguments: dict[str, object]) -> McpInvokeResult:
     """Invoke an MCP tool through the registered transport.
 
     Raises:
-        ToolNotAllowedError: If no transport has been registered.
+        No exceptions for missing transport: returns a structured
+        unconfigured payload so agents can continue without hard-failing.
     """
     args = McpInvokeArgs(tool=tool, arguments=arguments)
     transport = _mcp_transport
     if transport is None:
-        raise ToolNotAllowedError(tool_id="mcp_invoke")
+        def _unconfigured() -> McpInvokeResult:
+            return McpInvokeResult(
+                tool=args.tool,
+                payload={
+                    "ok": False,
+                    "error": "mcp transport not configured",
+                    "hint": (
+                        "No MCP transport is registered in this runtime. "
+                        "Skip mcp_invoke and continue with available tools."
+                    ),
+                },
+            )
+
+        return _telemetry("mcp_invoke", _unconfigured)
 
     def _invoke() -> McpInvokeResult:
         payload = transport(args.tool, dict(args.arguments))

@@ -16,6 +16,7 @@ Covers:
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from typing import TYPE_CHECKING, Any
 
@@ -96,8 +97,15 @@ class TestSafePath:
         assert result == (workdir / "src" / "foo.py").resolve()
 
     def test_rejects_absolute_path(self, workdir: Path) -> None:
+        # Absolute paths with '..' segments must still be rejected.
         with pytest.raises(PathTraversalError):
-            _safe_path(workdir, "/etc/passwd")
+            _safe_path(workdir, "/foo/../../etc/passwd")
+
+    def test_coerces_absolute_path_to_relative(self, workdir: Path) -> None:
+        # LLMs often emit '/tests/foo.py' when they mean 'tests/foo.py'.
+        # Coerce to relative; resulting path must stay inside workdir.
+        result = _safe_path(workdir, "/src/foo.py")
+        assert result == (workdir / "src" / "foo.py").resolve()
 
     def test_rejects_dotdot_traversal(self, workdir: Path) -> None:
         with pytest.raises(PathTraversalError):
@@ -143,6 +151,30 @@ class TestSubprocessTools:
     def test_run_tests_rejects_path_escape(self, workdir: Path) -> None:
         with pytest.raises(PathTraversalError):
             run_tests(workdir=workdir, path="../outside")
+
+    def test_run_tests_uses_npm_for_js_project(
+        self, workdir: Path, patch_run: list[dict[str, Any]],
+    ) -> None:
+        (workdir / "package.json").write_text("{}")
+        run_tests(workdir=workdir)
+        assert patch_run[0]["argv"] == ["npm", "test"]
+
+    def test_run_tests_sets_ci_for_npm_project(
+        self, workdir: Path, patch_run: list[dict[str, Any]],
+    ) -> None:
+        (workdir / "package.json").write_text("{}")
+        run_tests(workdir=workdir)
+        env = patch_run[0].get("env")
+        assert env is not None
+        assert env.get("CI") == "1"
+
+    def test_run_tests_prefers_pytest_when_python_markers_present(
+        self, workdir: Path, patch_run: list[dict[str, Any]],
+    ) -> None:
+        (workdir / "package.json").write_text("{}")
+        (workdir / "pyproject.toml").write_text("")
+        run_tests(workdir=workdir)
+        assert patch_run[0]["argv"][:2] == ["pytest", "-q"]
 
     def test_run_lint_invokes_ruff(
         self, workdir: Path, patch_run: list[dict[str, Any]],
@@ -253,11 +285,13 @@ class TestWebSearch:
 
 
 class TestMcpInvoke:
-    def test_raises_without_transport(self) -> None:
+    def test_returns_unconfigured_payload_without_transport(self) -> None:
         # Reset transport to ensure deterministic state.
         tools.set_mcp_transport(None)
-        with pytest.raises(ToolNotAllowedError):
-            tools.mcp_invoke(tool="echo", arguments={"x": 1})
+        result = tools.mcp_invoke(tool="echo", arguments={"x": 1})
+        assert result.tool == "echo"
+        assert result.payload.get("ok") is False
+        assert result.payload.get("error") == "mcp transport not configured"
 
     def test_uses_registered_transport(self) -> None:
         recorded: list[tuple[str, dict[str, object]]] = []
@@ -350,7 +384,7 @@ class TestRunSubprocessEnvWhitelist:
         assert "OPENAI_API_KEY" not in env
         assert "ANTHROPIC_API_KEY" not in env
         assert "AWS_SECRET_ACCESS_KEY" not in env
-        assert env.get("PATH") == "/usr/bin"
+        assert "/usr/bin" in env.get("PATH", "").split(os.pathsep)
 
     def test_non_gh_non_git_tool_drops_tokens(
         self,
@@ -368,7 +402,7 @@ class TestRunSubprocessEnvWhitelist:
         assert env is not None
         assert "GH_TOKEN" not in env
         assert "GITHUB_TOKEN" not in env
-        assert env.get("PATH") == "/usr/bin"
+        assert "/usr/bin" in env.get("PATH", "").split(os.pathsep)
 
     def test_passes_per_call_timeout(
         self,

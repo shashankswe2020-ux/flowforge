@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
@@ -28,7 +29,34 @@ from flowforge.nodes.stubs import (
     task_node as stub_task,
     test_engineer_node as stub_test_engineer,
 )
+from flowforge.scheduler.router import compute_next_runnable
 from flowforge.state.models import GraphState
+
+
+def _route_runnable_tasks(state: GraphState) -> list[Send] | str:
+    """Conditional router that emits one ``Send`` per ready task.
+
+    Reads the implementation plan's DAG, identifies tasks whose
+    predecessors have all reached a terminal state, and emits a ``Send``
+    payload per ready task so they each run as a parallel ``task_node``
+    invocation. When no tasks remain runnable (all done, or none could
+    progress), routes to the quality gate.
+
+    Returns either a list of :class:`langgraph.types.Send` (parallel
+    fan-out) or the string name of the next node when there is nothing
+    left to dispatch — see LangGraph conditional-edge semantics.
+    """
+    plan = state.implementation_plan
+    if plan is None or not plan.dag.tasks:
+        return "quality_gate_join"
+    runnable = compute_next_runnable(plan.dag, state.tasks)
+    if not runnable:
+        return "quality_gate_join"
+    base_payload = state.model_dump()
+    return [
+        Send("task_node", {**base_payload, "current_task_id": tid})
+        for tid in runnable
+    ]
 
 
 def build_graph() -> CompiledStateGraph:  # type: ignore[type-arg]
@@ -63,10 +91,19 @@ def build_graph() -> CompiledStateGraph:  # type: ignore[type-arg]
     graph.add_edge("clarification_node", "spec_node")
     graph.add_edge("spec_node", "plan_node")
 
-    # Plan -> task fanout -> task execution -> quality gate
+    # Plan -> task fanout -> task execution -> quality gate.
+    # task_fanout_router is a conditional edge that emits one Send per
+    # runnable task (Option A — dynamic DAG dispatch). task_node loops
+    # back into the router after each task so independent tasks run in
+    # parallel and dependents wait for their predecessors. When no
+    # tasks remain runnable, the router proceeds to the quality gate.
     graph.add_edge("plan_node", "task_fanout_router")
-    graph.add_edge("task_fanout_router", "task_node")
-    graph.add_edge("task_node", "quality_gate_join")
+    graph.add_conditional_edges(
+        "task_fanout_router",
+        _route_runnable_tasks,
+        {"quality_gate_join": "quality_gate_join", "task_node": "task_node"},
+    )
+    graph.add_edge("task_node", "task_fanout_router")
 
     # Quality gate fans out to parallel review branches
     graph.add_edge("quality_gate_join", "code_review_node")
@@ -151,8 +188,12 @@ def build_real_graph(llm: Any) -> CompiledStateGraph:  # type: ignore[type-arg]
     graph.add_edge("clarification_node", "spec_node")
     graph.add_edge("spec_node", "plan_node")
     graph.add_edge("plan_node", "task_fanout_router")
-    graph.add_edge("task_fanout_router", "task_node")
-    graph.add_edge("task_node", "quality_gate_join")
+    graph.add_conditional_edges(
+        "task_fanout_router",
+        _route_runnable_tasks,
+        {"quality_gate_join": "quality_gate_join", "task_node": "task_node"},
+    )
+    graph.add_edge("task_node", "task_fanout_router")
 
     # Parallel fan-out: code review, security audit, test engineer run simultaneously
     graph.add_edge("quality_gate_join", "code_review_node")
@@ -169,6 +210,20 @@ def build_real_graph(llm: Any) -> CompiledStateGraph:  # type: ignore[type-arg]
     graph.add_edge("ship_node", END)
 
     return graph.compile()
+
+
+_COPILOT_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
+
+
+def _exchange_for_copilot_token(oauth_token: str) -> str:
+    """Trade a Copilot OAuth token for a short-lived session token.
+
+    Thin wrapper around :func:`flowforge.auth.copilot.get_session_token`
+    so callers don't need to import the auth module directly.
+    """
+    from flowforge.auth.copilot import get_session_token
+
+    return get_session_token(oauth_token)
 
 
 def build_live_graph() -> CompiledStateGraph:  # type: ignore[type-arg]
@@ -209,13 +264,42 @@ def build_live_graph() -> CompiledStateGraph:  # type: ignore[type-arg]
             "No API key found. Set OPENAI_API_KEY env var or ensure `gh auth token` works."
         )
 
-    llm = ChatOpenAI(
-        model=model,
-        api_key=api_key,
-        base_url=api_base,
-        temperature=0.0,
-        max_tokens=4096,
+    # gpt-5 / o-series reject `max_tokens` and require
+    # `max_completion_tokens`; older chat models accept either via the
+    # OpenAI-compat surface but many third-party gateways only accept
+    # the legacy name. Pick the one this model expects.
+    is_reasoning_family = any(
+        tag in model.lower() for tag in ("gpt-5", "/o1", "/o3", "/o4")
     )
+    chat_kwargs: dict[str, Any] = {
+        "model": model,
+        "api_key": api_key,
+        "base_url": api_base,
+    }
+    if "api.githubcopilot.com" in api_base:
+        # GitHub Copilot's chat endpoint requires (a) a short-lived
+        # Copilot session token exchanged from the user's Copilot
+        # OAuth token, and (b) editor-identification headers.
+        copilot_token = _exchange_for_copilot_token(api_key)
+        chat_kwargs["api_key"] = copilot_token
+        chat_kwargs["default_headers"] = {
+            "Editor-Version": "vscode/1.95.0",
+            "Editor-Plugin-Version": "copilot-chat/0.20.0",
+            "Copilot-Integration-Id": "vscode-chat",
+        }
+        # Copilot's API uses bare model ids ("gpt-4o", not "openai/gpt-4o").
+        if model.startswith("openai/"):
+            chat_kwargs["model"] = model.split("/", 1)[1]
+    if is_reasoning_family:
+        # Reasoning-family models reject temperature overrides and
+        # require `max_completion_tokens`; budget is generous so the
+        # internal reasoning step has room before content tokens.
+        chat_kwargs["model_kwargs"] = {"max_completion_tokens": 16384}
+    else:
+        chat_kwargs["temperature"] = 0.0
+        chat_kwargs["max_tokens"] = 4096
+
+    llm = ChatOpenAI(**chat_kwargs)
 
     class _LLMWrapper:
         """Adapter to match the invoke(prompt) -> response.content interface."""

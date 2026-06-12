@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import click
@@ -167,6 +168,25 @@ def setup() -> None:
     _do_setup()
 
 
+@cli.command("copilot-login", context_settings={"help_option_names": ["-h", "--help"]})
+def copilot_login() -> None:
+    """Authorize FlowForge against your GitHub Copilot subscription.
+
+    Runs the GitHub device-flow against the Copilot OAuth client.
+    You'll be shown a code and a URL — open it in any browser, paste
+    the code, and authorize. The resulting token is cached at
+    ``~/.flowforge/copilot-oauth.json`` (mode 0600) and used by every
+    subsequent run.
+    """
+    from flowforge.auth.copilot import CopilotAuthError, device_login
+
+    try:
+        device_login()
+    except CopilotAuthError as exc:
+        click.echo(f"❌ Login failed: {exc}")
+        raise SystemExit(1) from exc
+
+
 def _do_setup() -> None:
     """Setup wizard implementation."""
     click.echo("━━━ FlowForge Setup ━━━\n")
@@ -185,15 +205,31 @@ def _do_setup() -> None:
 
     # Model selection based on provider
     if config.provider == "copilot":
-        config.api_base = "https://models.inference.ai.azure.com"
-        click.echo(f"\n  Using GitHub Models API at {config.api_base}")
-        click.echo("  Authentication: `gh auth token` (ensure `gh` CLI is logged in)")
+        config.api_base = "https://api.githubcopilot.com"
+        click.echo(f"\n  Using GitHub Copilot API at {config.api_base}")
+        click.echo("  Authentication: device-flow OAuth (one-time browser login)")
         model = click.prompt(
             "  Model",
-            default="gpt-4o-mini",
-            type=click.Choice(["gpt-4o-mini", "gpt-4o", "o1-mini", "o1-preview"]),
+            default="gpt-4o",
+            type=click.Choice(
+                ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "o1-mini", "claude-3.5-sonnet"]
+            ),
         )
         config.model = model
+        from flowforge.auth.copilot import (
+            CopilotAuthError,
+            device_login,
+            load_oauth_token,
+        )
+
+        if load_oauth_token() is None:
+            try:
+                device_login()
+            except CopilotAuthError as exc:
+                click.echo(f"\n❌ Copilot login failed: {exc}")
+                raise SystemExit(1) from exc
+        else:
+            click.echo("  Existing Copilot OAuth token found (re-run `swe-forge copilot-login` to refresh).")
     elif config.provider == "codex":
         config.api_base = "https://api.openai.com/v1"
         model = click.prompt(
@@ -501,7 +537,6 @@ def _checkout_run_branch(workdir: Path, branch_name: str) -> None:
 def _write_env_file(config: FlowForgeConfig) -> None:
     """Write .env with LLM credentials for langgraph dev to use."""
     import os
-    import subprocess
     from pathlib import Path
 
     env_dir = Path.home() / ".flowforge"
@@ -522,14 +557,15 @@ def _write_env_file(config: FlowForgeConfig) -> None:
 
     # Set API key
     if config.provider == "copilot":
+        from flowforge.auth.copilot import CopilotAuthError, ensure_oauth_token
+
         try:
-            result = subprocess.run(
-                ["gh", "auth", "token"], capture_output=True, text=True, check=True
+            env_vars["OPENAI_API_KEY"] = ensure_oauth_token(interactive=False)
+        except CopilotAuthError:
+            click.echo(
+                "❌ No Copilot OAuth token found. Run: swe-forge copilot-login"
             )
-            env_vars["OPENAI_API_KEY"] = result.stdout.strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            click.echo("❌ Failed to get GitHub token. Run: gh auth login")
-            raise SystemExit(1)
+            raise SystemExit(1) from None
     elif config.provider == "codex":
         key = os.environ.get("OPENAI_API_KEY", "")
         if not key:
@@ -862,8 +898,16 @@ def _start_studio(config: FlowForgeConfig) -> subprocess.Popen | None:  # type: 
     """Start LangGraph dev server in background."""
     import shutil
     import subprocess
+    import sys
 
-    if not shutil.which("langgraph"):
+    # Prefer the langgraph binary that ships next to the active
+    # interpreter (covers `python -m`, editable installs, and venvs
+    # whose bin/ isn't on PATH); fall back to PATH lookup. Don't
+    # resolve symlinks — venv pythons symlink to the system interpreter
+    # but the venv's bin/ is what we want.
+    candidate = Path(sys.executable).parent / "langgraph"
+    langgraph_bin = str(candidate) if candidate.exists() else shutil.which("langgraph")
+    if not langgraph_bin:
         return None
 
     click.echo(f"🚀 Starting LangGraph server on port {config.langgraph_port}...")
@@ -883,28 +927,52 @@ def _start_studio(config: FlowForgeConfig) -> subprocess.Popen | None:  # type: 
     log_handle = log_path.open("w")
     click.echo(f"   (server logs → {log_path})")
 
+    # Ensure the venv's bin/ is on PATH for the dev server and every
+    # subprocess it spawns. Without this, agentic tools that shell out
+    # to `pytest` / `ruff` / `mypy` raise FileNotFoundError when the CLI
+    # was launched via the venv binary directly (no `activate`).
+    venv_bin = str(Path(sys.executable).parent)
+    child_env = {**os.environ}
+    existing_path = child_env.get("PATH", "")
+    if venv_bin not in existing_path.split(os.pathsep):
+        child_env["PATH"] = venv_bin + (os.pathsep + existing_path if existing_path else "")
+
     process = subprocess.Popen(
         [
-            "langgraph", "dev",
+            langgraph_bin, "dev",
             "--config", str(config_path),
             "--port", str(config.langgraph_port),
             "--no-browser",
             "--no-reload",
+            "--allow-blocking",
         ],
         stdout=log_handle,
         stderr=subprocess.STDOUT,
         cwd=str(flowforge_dir),
+        env=child_env,
     )
 
     import time
-    time.sleep(2)
 
-    if process.poll() is not None:
-        click.echo("⚠️  LangGraph server failed to start.\n")
-        click.echo(f"   Check log: {log_path}\n")
-        return None
+    # Poll the port for up to 15s; the in-memory server typically binds
+    # within ~1s but cold-import of the graph module can take longer.
+    deadline = time.monotonic() + 15.0
+    import socket as _socket
 
-    return process
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            click.echo("⚠️  LangGraph server failed to start.\n")
+            click.echo(f"   Check log: {log_path}\n")
+            return None
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+            s.settimeout(0.25)
+            if s.connect_ex(("127.0.0.1", config.langgraph_port)) == 0:
+                return process
+        time.sleep(0.25)
+
+    click.echo("⚠️  LangGraph server did not become ready within 15s.\n")
+    click.echo(f"   Check log: {log_path}\n")
+    return None
 
 
 if __name__ == "__main__":

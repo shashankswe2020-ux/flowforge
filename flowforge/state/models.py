@@ -12,6 +12,45 @@ from pydantic import BaseModel, Field
 
 from flowforge.deep_agents import AgentRole  # noqa: TC001  # runtime use by Pydantic
 
+
+def _merge_trace_dicts(
+    left: dict[str, "DeepAgentTrace"] | None,
+    right: dict[str, "DeepAgentTrace"] | None,
+) -> dict[str, "DeepAgentTrace"]:
+    """LangGraph reducer: merge per-node trace dicts from parallel fan-out updates."""
+    return {**(left or {}), **(right or {})}
+
+
+def _merge_tasks(
+    left: list["Task"] | None,
+    right: list["Task"] | None,
+) -> list["Task"]:
+    """LangGraph reducer: merge per-task updates from parallel ``Send`` fan-out.
+
+    Each ``task_node`` invocation in a Send-based wave returns
+    ``{"tasks": [updated_task]}`` for the single task it executed. The
+    reducer merges those single-task updates into the existing list,
+    keying by ``task_id`` so a later update for the same task replaces
+    the earlier entry. Original ordering is preserved; brand-new tasks
+    are appended at the end (e.g. quality-loopback proposed tasks).
+    """
+    if not left:
+        return list(right or [])
+    if not right:
+        return list(left)
+    overrides: dict[str, Task] = {t.task_id: t for t in right}
+    seen: set[str] = set()
+    merged: list[Task] = []
+    for task in left:
+        merged.append(overrides.get(task.task_id, task))
+        seen.add(task.task_id)
+    for task in right:
+        if task.task_id not in seen:
+            merged.append(task)
+            seen.add(task.task_id)
+    return merged
+
+
 # --- Enums ---
 
 
@@ -402,7 +441,14 @@ class GraphState(BaseModel):
     implementation_plan: ImplementationPlan | None = None
 
     # Tasks
-    tasks: list[Task] = Field(default_factory=list)
+    tasks: Annotated[list[Task], _merge_tasks] = Field(default_factory=list)
+
+    # Per-invocation task selector — set by ``task_fanout_router`` when it
+    # emits a ``Send("task_node", {...})`` for a specific runnable task.
+    # ``task_node`` reads this to execute a single task per invocation
+    # under Option-A dynamic DAG dispatch. ``None`` triggers the legacy
+    # all-at-once execution path (used by direct unit-test callers).
+    current_task_id: str | None = None
 
     # Quality findings
     review_findings: list[Finding] = Field(default_factory=list)
@@ -421,5 +467,11 @@ class GraphState(BaseModel):
     # Run metadata
     run_metadata: RunMetadata | None = None
 
-    # Deep Agent traces, keyed by LangGraph node name (spec §8.1)
-    deep_agent_traces: dict[str, DeepAgentTrace] = Field(default_factory=dict)
+    # Deep Agent traces, keyed by LangGraph node name (spec §8.1).
+    # Annotated with a dict-merge reducer so parallel fan-out nodes
+    # (e.g. task_node Sends) can each contribute a trace in the same
+    # superstep without colliding.
+    deep_agent_traces: Annotated[
+        dict[str, DeepAgentTrace],
+        _merge_trace_dicts,
+    ] = Field(default_factory=dict)

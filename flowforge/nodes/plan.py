@@ -63,6 +63,9 @@ def _build_prompt(state: GraphState) -> str:
     spec = state.spec
     assert spec is not None
 
+    workdir = get_workdir(state)
+    prior_plans = _collect_prior_plans(workdir)
+
     # Build rich context from all available spec fields
     spec_context_parts = [
         f"**Summary**: {spec.summary}",
@@ -103,6 +106,39 @@ def _build_prompt(state: GraphState) -> str:
 verifiable tasks with explicit acceptance criteria and dependency ordering.
 You do NOT write code — you produce plans.
 
+## Process (do this in order)
+
+### Step 1: Gather Context (read-only)
+
+Before writing the plan, inspect what already exists. Use your filesystem
+tools (`read`, `ls`, `glob`, `grep`) to:
+
+1. Re-read the spec at `vfs:/context/spec.json` for the full requirements.
+2. List the workdir to learn the existing project structure and tech stack
+   markers (e.g., `package.json`, `pyproject.toml`, `tsconfig.json`).
+3. Read any prior plan markdown under `docs/plans/` so you can extend
+   rather than duplicate. Cite them in `architecture_decisions` when you
+   carry decisions forward.
+4. If the spec touches an unfamiliar library or external API, use
+   `web_search` to confirm current best practices before committing to a
+   shape.
+
+### Step 2: Decompose
+
+Apply the planning-and-task-breakdown skill (auto-loaded for this role).
+Slice vertically, size each task to a single focused session, and keep
+the dependency graph acyclic with checkpoints between phases.
+
+### Step 3: Estimate
+
+If a task is non-trivial to size, dispatch the `estimator` sub-agent to
+produce a defensible complexity bucket. Update the task in place.
+
+### Step 4: Emit
+
+Write the final plan JSON to `{_PLAN_VFS_PATH}` using your `write` tool.
+Do not produce prose — the orchestrator parses the JSON directly.
+
 ## Methodology: Planning and Task Breakdown
 
 Follow these principles:
@@ -138,6 +174,10 @@ Follow these principles:
 ## Spec
 
 {spec_context}
+
+## Prior Plans
+
+{prior_plans}
 
 ## Your Task
 
@@ -301,6 +341,28 @@ def _normalize_complexity(value: str) -> str:
     return mapping.get(value.lower().strip(), "m")
 
 
+def _collect_prior_plans(workdir: Path) -> str:
+    """Summarize existing ``docs/plans/*.md`` so the planner extends them."""
+    plans_dir = workdir / "docs" / "plans"
+    if not plans_dir.is_dir():
+        return "_None — this is the first plan for the workdir._"
+    entries: list[str] = []
+    for p in sorted(plans_dir.glob("*.md")):
+        # First non-empty heading or first 240 chars of body, whichever lands first.
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        title = next(
+            (line.lstrip("# ").strip() for line in text.splitlines() if line.startswith("#")),
+            p.stem,
+        )
+        entries.append(f"- `docs/plans/{p.name}` — {title}")
+    if not entries:
+        return "_None — this is the first plan for the workdir._"
+    return "\n".join(entries)
+
+
 def _normalize_capability(value: str) -> str:
     """Normalize capability type to valid enum value."""
     mapping = {
@@ -358,12 +420,12 @@ def _render_plan_markdown(parsed: dict[str, Any], plan: ImplementationPlan) -> s
                 lines.append(f"- [ ] {criterion}")
             lines.append("")
 
-    # Dependency graph
-    if parsed.get("edges"):
+    # Dependency graph (rendered as a Mermaid graph TD block so GitHub
+    # / Studio Files / VS Code preview show it as an actual diagram).
+    if parsed.get("edges") or parsed.get("tasks"):
         lines.append("## Dependency Graph\n")
-        lines.append("```")
-        for edge in parsed["edges"]:
-            lines.append(f"{edge['from_task_id']} → {edge['to_task_id']}")
+        lines.append("```mermaid")
+        lines.append(_render_mermaid_dag(parsed))
         lines.append("```")
         lines.append("")
 
@@ -386,6 +448,28 @@ def _render_plan_markdown(parsed: dict[str, Any], plan: ImplementationPlan) -> s
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _render_mermaid_dag(parsed: dict[str, Any]) -> str:
+    """Render the plan's task DAG as Mermaid ``graph TD`` source."""
+    out: list[str] = ["graph TD"]
+    seen: set[str] = set()
+    for task in parsed.get("tasks", []):
+        tid = str(task.get("task_id", "")).strip()
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        title = str(task.get("title", "")).strip().replace('"', "'")
+        label = f'{tid}["{title}"]' if title else tid
+        out.append(f"    {label}")
+    for edge in parsed.get("edges", []):
+        src = str(edge.get("from_task_id", "")).strip()
+        dst = str(edge.get("to_task_id", "")).strip()
+        if src and dst:
+            out.append(f"    {src} --> {dst}")
+    if len(out) == 1:
+        out.append("    %% no tasks")
+    return "\n".join(out)
 
 
 def _commit_plan_to_repo(
@@ -411,11 +495,17 @@ def _commit_plan_to_repo(
     markdown = _render_plan_markdown(parsed, plan)
     plan_path.write_text(markdown, encoding="utf-8")
 
+    # Sidecar Mermaid file so Studio Files / IDE previews can render
+    # the plan DAG without parsing the markdown fence.
+    mmd_path = plan_dir / f"{plan_name}.mmd"
+    mmd_path.write_text(_render_mermaid_dag(parsed) + "\n", encoding="utf-8")
+
     # Git add and commit
     try:
         rel = plan_path.relative_to(workdir)
+        rel_mmd = mmd_path.relative_to(workdir)
         subprocess.run(
-            ["git", "add", str(rel)],
+            ["git", "add", str(rel), str(rel_mmd)],
             cwd=cwd, capture_output=True, text=True, check=True,
         )
         subprocess.run(
@@ -512,14 +602,12 @@ def _run_via_deep_agent(
             {
                 "role": "user",
                 "content": (
-                    "Decompose the spec at vfs:/context/spec.json into a "
-                    "vertically-sliced implementation plan. Write the final "
-                    f"plan JSON to {_PLAN_VFS_PATH}. The JSON must include "
-                    "phases, tasks (with task_id, title, description, "
-                    "acceptance_checks, verification_step, "
-                    "estimated_complexity, capability_type), edges, and "
-                    "plan_revision. Use the planner sub-agents (estimator) "
-                    "for sizing."
+                    "Use your filesystem tools (`read`, `ls`, `glob`) and "
+                    "`web_search` to gather context first, then produce the "
+                    "plan. Write the final plan JSON to "
+                    f"{_PLAN_VFS_PATH} via your `write` tool. The orchestrator "
+                    "parses that file directly — emit JSON only, no prose.\n\n"
+                    + _build_prompt(state)
                 ),
             },
         ],

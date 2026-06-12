@@ -7,7 +7,9 @@ the agent VFS, but never outside the namespaces granted below.
 
 ## Methodology — incremental TDD
 
-Use `write_todos` to plan, then drive a strict Red → Green → Refactor cycle:
+Use `write_todos` to plan, then drive a strict Red → Green → Refactor cycle.
+Limit `write_todos` to at most two calls per task (initial plan + final
+reconciliation); do not repeatedly rewrite the same todo list:
 
 1. **Read context.** Load `vfs:/context/spec.json`,
    `vfs:/context/plan.json`, and the current task description from your

@@ -50,6 +50,22 @@ _FINDING_SOURCES: Final[tuple[tuple[str, str], ...]] = (
     ("vfs:/context/findings/test.json", "test_findings"),
 )
 
+# ~8 000 chars ≈ 2 000 tokens — keeps the full VFS well inside a 12k-token
+# prompt limit for small-context models (Copilot gpt-4o-mini = 12 288 tokens).
+# Larger models are unaffected since truncation only fires when content exceeds
+# the cap.
+_VFS_CONTEXT_CHAR_LIMIT: Final[int] = 8_000
+_VFS_ARTIFACT_CHAR_LIMIT: Final[int] = 4_000
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Return ``text`` capped at ``limit`` chars with a truncation notice."""
+    if len(text) <= limit:
+        return text
+    kept = text[:limit]
+    omitted = len(text) - limit
+    return f"{kept}\n... [{omitted} chars truncated — read vfs:/ directly for full content]"
+
 
 class PathTraversalError(ValueError):
     """Raised when a VFS path resolves outside its workdir."""
@@ -93,6 +109,9 @@ def materialize_files(state: GraphState) -> dict[str, str]:
     * ``vfs:/context/findings/{review,security,test}.json`` — JSON
       arrays of prior findings (when non-empty).
 
+    Each context entry is capped at :data:`_VFS_CONTEXT_CHAR_LIMIT`
+    characters to avoid overflowing small-context models.
+
     Raises:
         PathTraversalError: If any artifact path is absolute or
             contains ``..`` segments.
@@ -108,26 +127,32 @@ def materialize_files(state: GraphState) -> dict[str, str]:
                     f"artifact path {rel!r} on task {task.task_id!r} "
                     "must be relative without '..' segments",
                 )
-            files[f"{_VFS_PREFIX}{rel}"] = artifact.content
+            # Only pre-load small files; large ones are already on disk and
+            # the agent can discover + read them via ls/glob/read_file.
+            if len(artifact.content) <= _VFS_ARTIFACT_CHAR_LIMIT:
+                files[f"{_VFS_PREFIX}{rel}"] = artifact.content
 
     if state.clarified_request is not None:
-        files["vfs:/context/clarified_request.json"] = (
-            state.clarified_request.model_dump_json()
+        files["vfs:/context/clarified_request.json"] = _truncate(
+            state.clarified_request.model_dump_json(), _VFS_CONTEXT_CHAR_LIMIT,
         )
 
     if state.spec is not None:
-        files["vfs:/context/spec.json"] = state.spec.model_dump_json()
+        files["vfs:/context/spec.json"] = _truncate(
+            state.spec.model_dump_json(), _VFS_CONTEXT_CHAR_LIMIT,
+        )
 
     if state.implementation_plan is not None:
-        files["vfs:/context/plan.json"] = (
-            state.implementation_plan.model_dump_json()
+        files["vfs:/context/plan.json"] = _truncate(
+            state.implementation_plan.model_dump_json(), _VFS_CONTEXT_CHAR_LIMIT,
         )
 
     for vfs_path, attr in _FINDING_SOURCES:
         findings: list[Finding] = getattr(state, attr)
         if findings:
-            files[vfs_path] = json.dumps(
-                [f.model_dump(mode="json") for f in findings],
+            files[vfs_path] = _truncate(
+                json.dumps([f.model_dump(mode="json") for f in findings]),
+                _VFS_CONTEXT_CHAR_LIMIT,
             )
 
     return files

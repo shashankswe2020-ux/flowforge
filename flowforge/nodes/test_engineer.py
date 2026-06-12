@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Final, Protocol, cast
 
 from flowforge.config.deep_agents import resolve_deep_agents_enabled
 from flowforge.deep_agents import AgentRole
@@ -46,6 +46,10 @@ class LLMProtocol(Protocol):
     def invoke(self, prompt: str) -> Any: ...  # noqa: ANN401
 
 
+_PROMPT_ARTIFACT_CHAR_LIMIT: Final[int] = 3_000
+"""Per-artifact content limit when embedding in a prompt string."""
+
+
 def _build_prompt(state: GraphState) -> str:
     """Build test engineer prompt following test-engineer agent methodology."""
     # Gather artifact details including content
@@ -56,7 +60,10 @@ def _build_prompt(state: GraphState) -> str:
             for art in task.artifacts:
                 section = f"### {art.path} ({art.artifact_type})"
                 if hasattr(art, "content") and art.content:
-                    section += f"\n```\n{art.content}\n```"
+                    body = art.content
+                    if len(body) > _PROMPT_ARTIFACT_CHAR_LIMIT:
+                        body = body[:_PROMPT_ARTIFACT_CHAR_LIMIT] + f"\n... [{len(art.content) - _PROMPT_ARTIFACT_CHAR_LIMIT} chars truncated]"
+                    section += f"\n```\n{body}\n```"
                 else:
                     section += f"\n  fingerprint: {art.fingerprint}"
                 if art.artifact_type == "test":
@@ -81,49 +88,94 @@ def _build_prompt(state: GraphState) -> str:
 {chr(10).join(f'- {c}' for c in state.spec.acceptance_criteria[:8])}
 """
 
+    # Prior test report awareness
+    prior_reports_section = ""
+    workdir = get_workdir(state) if state.workdir else None
+    if workdir is not None:
+        report_dir = workdir / "docs" / "test-reports"
+        if report_dir.is_dir():
+            prior = sorted(report_dir.glob("test-report-*.md"))
+            if prior:
+                names = ", ".join(p.name for p in prior[-5:])
+                prior_reports_section = (
+                    f"\n## Prior Test Reports\n"
+                    f"The repo contains {len(prior)} previous report(s): {names}. "
+                    f"Read the most recent and re-flag any unresolved Critical/High coverage gaps "
+                    f"that still apply.\n"
+                )
+
     return f"""You are an experienced QA Engineer focused on test strategy and quality assurance.
 Your role is to evaluate test coverage, identify gaps, and ensure code changes are verified.
 
+## Process
+
+1. **Gather context first.** Read the spec acceptance criteria, the
+   source and test artifacts, and any prior test reports listed below.
+   If you have tools available (`run_tests`, `read_file`,
+   `list_files`), run the existing suite and quote real coverage
+   numbers in your findings rather than guessing.
+2. **Apply the test-level decision tree** before recommending any new
+   test (see below).
+3. **Use the Prove-It pattern** for any suspected bug — describe the
+   exact failing test that would prove the bug, then the expected vs
+   actual behavior, before suggesting a fix.
+
 ## Methodology: Test Engineering
 
-### Test Level Selection
+### Test Level Decision Tree
 
 ```
-Pure logic, no I/O          → Unit test
-Crosses a boundary          → Integration test
-Critical user flow          → E2E test
+Pure logic, no I/O                    → Unit test          (small, milliseconds)
+Crosses one boundary (DB, HTTP, FS)   → Integration test   (medium, seconds)
+Critical end-to-end user flow         → E2E test           (large, minutes)
 ```
 
-Test at the LOWEST level that captures the behavior. Don't use E2E tests for unit-testable logic.
+Test at the LOWEST level that captures the behavior. Don't use E2E
+tests for unit-testable logic. Target pyramid: ~80% unit, ~15%
+integration, ~5% E2E.
 
 ### Required Scenario Coverage
 
-For every function/component, verify these are tested:
+For every public function/component, verify these are tested:
 
-| Scenario | What to check |
-|----------|---------------|
-| Happy path | Valid input produces expected output |
-| Empty input | Empty string, empty array, null, undefined |
-| Boundary values | Min, max, zero, negative, off-by-one |
-| Error paths | Invalid input, network failure, timeout |
-| Concurrency | Rapid calls, out-of-order responses |
+| Scenario       | What to check                                            |
+|----------------|----------------------------------------------------------|
+| Happy path     | Valid input produces expected output                     |
+| Empty input    | Empty string, empty array, null, undefined               |
+| Boundary values| Min, max, zero, negative, off-by-one                     |
+| Error paths    | Invalid input, network failure, timeout                  |
+| Concurrency    | Rapid calls, out-of-order responses (where applicable)   |
 
 ### Test Quality Rules
 
-1. Test BEHAVIOR, not implementation details
-2. Each test verifies ONE concept
-3. Tests are independent — no shared mutable state
-4. Mock at system boundaries (network, DB), not internal functions
-5. Test names read like specifications ("should return 404 when user not found")
-6. A test that never fails is as useless as always-failing
+1. Test BEHAVIOR (state), not implementation details (interactions).
+2. Each test verifies ONE concept; one logical assertion per test.
+3. Tests are independent — no shared mutable state, no order coupling.
+4. Mock at system boundaries (network, DB), not internal functions.
+   Prefer real > fake > stub > mock.
+5. Test names read like specifications
+   (`should return 404 when user not found`).
+6. Follow Arrange-Act-Assert structure; DAMP > DRY in tests.
+7. A test that never fails is as useless as one that always fails.
 
 ### Prove-It Pattern (for bugs)
 
 If code has a potential bug:
-1. Describe a test that would FAIL with current code
-2. Specify expected vs actual behavior
-3. This proves the bug exists before any fix attempt
-{testing_context}
+1. **Write the test that would FAIL** with current code.
+2. **Confirm it fails** (RED).
+3. State expected vs actual behavior.
+4. Implement the fix; confirm the test passes (GREEN).
+5. Run the full suite to ensure no regressions.
+
+### Anti-Patterns to Flag
+
+- Implementation-detail tests that break on refactor.
+- Time-based / flaky tests (`setTimeout`, real clock, network races).
+- Snapshot tests without behavioral assertions.
+- Over-mocking — mocking internal modules instead of seams.
+- Tests that test the framework rather than your code.
+- Single-assertion-per-line bloat that obscures intent.
+{testing_context}{prior_reports_section}
 ## Source Code Artifacts
 
 {source_text}
@@ -135,10 +187,17 @@ If code has a potential bug:
 ## Your Task
 
 Analyze the code and tests. Identify:
-1. **Coverage gaps** — untested functions, missing edge cases, uncovered paths
-2. **Test quality issues** — implementation-coupled tests, flaky patterns, shared state
-3. **Missing test levels** — logic tested only at integration level, no unit test
-4. **Prove-It opportunities** — potential bugs that need failing tests
+1. **Coverage gaps** — untested functions, missing edge cases, uncovered paths.
+2. **Test quality issues** — implementation-coupled tests, flaky patterns, shared state, over-mocking.
+3. **Missing test levels** — logic tested only at integration/E2E that should have unit tests.
+4. **Prove-It opportunities** — potential bugs that need failing tests before fixes.
+
+Severity guidance:
+- **critical** — Untested data-loss / security path, or test that masks a real bug.
+- **high** — Untested core business logic; flaky test in CI.
+- **medium** — Missing edge cases on a tested function.
+- **low** — Naming or structure issues in tests.
+- **info** — Optional improvements.
 
 Respond with a JSON object:
 
@@ -147,19 +206,26 @@ Respond with a JSON object:
   "coverage_assessment": {{
     "tested_functions": ["list of functions with tests"],
     "untested_functions": ["list of functions missing tests"],
-    "estimated_coverage_percent": 75
+    "estimated_coverage_percent": 75,
+    "coverage_target_percent": 80,
+    "critical_paths_covered": true
   }},
   "findings": [
     {{
       "finding_id": "test-1",
       "severity": "critical" | "high" | "medium" | "low" | "info",
       "confidence": 0.9,
-      "category": "coverage_gap" | "test_quality" | "missing_level" | "prove_it_bug",
+      "category": "coverage_gap" | "test_quality" | "missing_level" | "prove_it_bug" | "anti_pattern",
       "title": "Short actionable title",
       "description": "What's missing and why it matters",
       "file_path": "path/to/file.ext",
       "line_range": [start_line, end_line],
-      "suggestion": "Specific test code or approach to fix the gap"
+      "suggestion": "Specific test code or approach to fix the gap",
+      "prove_it": {{
+        "failing_test_sketch": "Required for category=prove_it_bug",
+        "expected_behavior": "What should happen",
+        "actual_behavior": "What happens today"
+      }}
     }}
   ],
   "proposed_tasks": [
@@ -170,18 +236,20 @@ Respond with a JSON object:
       "acceptance_checks": ["All edge cases covered", "Tests pass independently"],
       "estimated_complexity": "s",
       "capability_type": "agent_only",
-      "verification_step": "pytest tests/test_component.py -v"
+      "verification_step": "pytest tests/test_component.py -v",
+      "test_level": "unit" | "integration" | "e2e"
     }}
   ]
 }}
 
 ## Quality Gate
 
-- [ ] Every untested public function is flagged
-- [ ] Missing edge case scenarios are identified
-- [ ] Test level appropriateness is evaluated
-- [ ] Proposed tasks have clear acceptance criteria and verification commands
-- [ ] Prove-It pattern applied to any suspected bugs
+- [ ] Every untested public function appears in `coverage_assessment.untested_functions` AND has a finding or proposed task.
+- [ ] Each missing edge case scenario is identified with a `coverage_gap` finding.
+- [ ] Test level is set on every proposed task.
+- [ ] Proposed tasks have clear acceptance criteria and a runnable `verification_step`.
+- [ ] Prove-It pattern applied to any suspected bug (`category=prove_it_bug` MUST include `prove_it` block).
+- [ ] At least one anti-pattern flagged if any tests show implementation-coupling, flakiness, or over-mocking.
 
 Respond ONLY with the JSON object. No markdown fences, no explanation."""
 
@@ -471,20 +539,20 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         llm=cast("BaseChatModel", llm),
         workdir=workdir,
     )
+    rubric = _build_prompt(state)
+    user_message = (
+        "Evaluate test quality on the artifacts in your VFS using the"
+        " rubric below. Use your tools (`run_tests`, `read_file`,"
+        " `list_files`) to run the existing suite and quote real"
+        " coverage numbers in your findings. After producing the JSON,"
+        " also save it verbatim to vfs:/findings/test.json, write the"
+        " proposed tasks array to vfs:/context/proposed_tasks.json, and"
+        " write a markdown report at"
+        " vfs:/docs/test-reports/test-report.md.\n\n"
+        + rubric
+    )
     payload: dict[str, Any] = {
-        "messages": [
-            {
-                "role": "user",
-                "content": (
-                    "Evaluate test quality on the artifacts in your VFS."
-                    " Emit findings to vfs:/findings/test.json, propose"
-                    " follow-up test tasks at"
-                    " vfs:/context/proposed_tasks.json, and write a"
-                    " markdown report to"
-                    " vfs:/docs/test-reports/test-report.md."
-                ),
-            },
-        ],
+        "messages": [{"role": "user", "content": user_message}],
         "files": files,
     }
     invocations: list[ToolInvocationRecord] = []
@@ -513,6 +581,24 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         [m for m in raw_messages if isinstance(m, dict)]
         if isinstance(raw_messages, list) else []
     )
+
+    # Recover summary / coverage_assessment from the agent's final
+    # assistant message; fall back to defaults if not parseable.
+    metadata: dict[str, Any] = {
+        "summary": "Deep-agent test review run.",
+        "coverage_assessment": {},
+    }
+    for m in reversed(messages):
+        content = m.get("content")
+        if not isinstance(content, str):
+            continue
+        try:
+            _, _, parsed_meta = _parse_response(content)
+        except (json.JSONDecodeError, KeyError, ValueError):
+            continue
+        metadata.update(parsed_meta)
+        break
+
     trace = DeepAgentTrace(
         role=AgentRole.TESTER,
         messages_digest=DeepAgentTrace.digest_messages(messages),
@@ -520,10 +606,6 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         tool_invocations=invocations,
     )
 
-    metadata: dict[str, Any] = {
-        "summary": "Deep-agent test review run.",
-        "coverage_assessment": {},
-    }
     _commit_report_to_repo(
         findings,
         proposed_tasks,

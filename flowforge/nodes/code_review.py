@@ -59,7 +59,9 @@ def _build_prompt(state: GraphState) -> str:
                     section += f"\n  fingerprint: {art.fingerprint}"
                 artifact_sections.append(section)
 
-    artifacts_text = "\n\n".join(artifact_sections) if artifact_sections else "(no artifacts to review)"
+    artifacts_text = (
+        "\n\n".join(artifact_sections) if artifact_sections else "(no artifacts to review)"
+    )
 
     # Get spec context if available
     spec_context = ""
@@ -67,7 +69,7 @@ def _build_prompt(state: GraphState) -> str:
         spec_context = f"""
 ## Spec Context
 - **Objective**: {state.spec.objective}
-- **Acceptance criteria**: {'; '.join(state.spec.acceptance_criteria[:5])}
+- **Acceptance criteria**: {"; ".join(state.spec.acceptance_criteria[:5])}
 """
         if state.spec.security_considerations:
             spec_context += f"- **Security requirements**: {'; '.join(state.spec.security_considerations[:3])}\n"
@@ -208,7 +210,9 @@ Respond with a JSON object:
 Respond ONLY with the JSON object. No markdown fences, no explanation."""
 
 
-def _parse_findings(response_content: str, source_node: str) -> tuple[list[Finding], dict[str, Any]]:
+def _parse_findings(
+    response_content: str, source_node: str
+) -> tuple[list[Finding], dict[str, Any]]:
     """Parse LLM response into Finding objects and metadata.
 
     Returns (findings, review_metadata) where metadata includes verdict, summary, done_well.
@@ -223,7 +227,7 @@ def _parse_findings(response_content: str, source_node: str) -> tuple[list[Findi
             lines = lines[:-1]
         content = "\n".join(lines)
 
-    parsed = json.loads(content)
+    parsed = json.loads(content, strict=False)
     findings: list[Finding] = []
 
     for f in parsed.get("findings", []):
@@ -255,9 +259,7 @@ def _parse_findings(response_content: str, source_node: str) -> tuple[list[Findi
     return findings, metadata
 
 
-def _render_review_markdown(
-    findings: list[Finding], metadata: dict[str, Any]
-) -> str:
+def _render_review_markdown(findings: list[Finding], metadata: dict[str, Any]) -> str:
     """Render review as markdown following code-reviewer agent template."""
     verdict_emoji = "✅ APPROVE" if metadata["verdict"] == "approve" else "❌ REQUEST CHANGES"
     lines: list[str] = []
@@ -381,11 +383,17 @@ def _commit_review_to_repo(
         rel = review_path.relative_to(workdir)
         subprocess.run(
             ["git", "add", str(rel)],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         subprocess.run(
             ["git", "commit", "-m", f"docs: add code review checkpoint {next_num}"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
@@ -405,11 +413,18 @@ def _create_github_issues(findings: list[Finding], state: GraphState) -> None:
     try:
         subprocess.run(
             [
-                "gh", "label", "create", "issue-by-code-review",
-                "--color", "D93F0B",
-                "--description", "Issue identified during code review",
+                "gh",
+                "label",
+                "create",
+                "issue-by-code-review",
+                "--color",
+                "D93F0B",
+                "--description",
+                "Issue identified during code review",
             ],
-            cwd=cwd, capture_output=True, text=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
         )
     except FileNotFoundError:
         return  # gh CLI not available
@@ -440,12 +455,20 @@ def _create_github_issues(findings: list[Finding], state: GraphState) -> None:
         try:
             subprocess.run(
                 [
-                    "gh", "issue", "create",
-                    "--label", "issue-by-code-review",
-                    "--title", title,
-                    "--body", body,
+                    "gh",
+                    "issue",
+                    "create",
+                    "--label",
+                    "issue-by-code-review",
+                    "--title",
+                    title,
+                    "--body",
+                    body,
                 ],
-                cwd=cwd, capture_output=True, text=True, check=True,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                check=True,
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
             continue  # Skip if issue creation fails
@@ -500,8 +523,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         " tools (run_lint, run_typecheck, git_status, git_diff) to gather"
         " evidence before writing findings. After producing the JSON,"
         " also save it verbatim to vfs:/findings/review.json and write a"
-        " markdown report at vfs:/docs/reviews/code-review.md.\n\n"
-        + rubric
+        " markdown report at vfs:/docs/reviews/code-review.md.\n\n" + rubric
     )
     payload: dict[str, Any] = {
         "messages": [{"role": "user", "content": user_message}],
@@ -530,8 +552,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         }
 
     findings = [
-        f.model_copy(update={"source_node": "code_review_node"})
-        for f in extract_findings(result)
+        f.model_copy(update={"source_node": "code_review_node"}) for f in extract_findings(result)
     ]
 
     # Try to recover verdict / summary / done_well / verification_story
@@ -544,8 +565,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
     }
     raw_messages = result.get("messages")
     messages: list[dict[str, object]] = (
-        [m for m in raw_messages if isinstance(m, dict)]
-        if isinstance(raw_messages, list) else []
+        [m for m in raw_messages if isinstance(m, dict)] if isinstance(raw_messages, list) else []
     )
     for m in reversed(messages):
         content = m.get("content")
@@ -560,8 +580,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
 
     raw_files = result.get("files")
     vfs_keys: list[str] = (
-        sorted(k for k in raw_files if isinstance(k, str))
-        if isinstance(raw_files, dict) else []
+        sorted(k for k in raw_files if isinstance(k, str)) if isinstance(raw_files, dict) else []
     )
     trace = DeepAgentTrace(
         role=AgentRole.REVIEWER,
@@ -577,4 +596,3 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         "review_findings": findings,
         "deep_agent_traces": {"code_review_node": trace},
     }
-

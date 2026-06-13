@@ -62,7 +62,7 @@ def _parse_llm_response(task: Task, response_content: str) -> TaskExecutionResul
         content = "\n".join(lines)
 
     try:
-        parsed = json.loads(content)
+        parsed = json.loads(content, strict=False)
     except (json.JSONDecodeError, TypeError) as e:
         return TaskExecutionResult(
             task_id=task.task_id,
@@ -155,7 +155,7 @@ Follow the TDD cycle for this task:
 - **Task ID**: {defn.task_id}
 - **Title**: {defn.title}
 - **Description**: {defn.description}
-- **Acceptance Checks**: {'; '.join(defn.acceptance_checks)}
+- **Acceptance Checks**: {"; ".join(defn.acceptance_checks)}
 - **Estimated Complexity**: {defn.estimated_complexity}
 - **Verification Step**: {defn.verification_step}
 

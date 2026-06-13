@@ -185,11 +185,7 @@ def clarification_node(
     - If dimensions are unresolved: asks a question, returns waiting_for_input.
     - If all dimensions resolved: summarizes, produces ClarifiedRequest, stays RUNNING.
     """
-    if (
-        state.auto_clarify
-        and not state.clarified_request
-        and resolve_deep_agents_enabled()
-    ):
+    if state.auto_clarify and not state.clarified_request and resolve_deep_agents_enabled():
         return _run_via_deep_agent(state, llm)
 
     # Auto-clarify mode (CLI / non-interactive flow)
@@ -207,13 +203,10 @@ def clarification_node(
                 lines = lines[:-1]
             content = "\n".join(lines)
 
-        parsed = json.loads(content)
+        parsed = json.loads(content, strict=False)
         summary = parsed.get("summary", "")
 
-        answers = {
-            d: parsed.get(d, "")
-            for d in REQUIRED_DIMENSIONS
-        }
+        answers = {d: parsed.get(d, "") for d in REQUIRED_DIMENSIONS}
 
         # Build transcript with auto-resolved exchanges
         now = datetime.now(tz=UTC)
@@ -248,7 +241,7 @@ def clarification_node(
     if not unresolved:
         prompt = _build_summary_prompt(state)
         response = llm.invoke(prompt)
-        parsed = json.loads(response.content)
+        parsed = json.loads(response.content, strict=False)
         summary = parsed.get("summary", "")
 
         answers = _extract_answers_by_dimension(state)
@@ -269,7 +262,7 @@ def clarification_node(
     # Still unresolved — ask a question
     prompt = _build_prompt(state, unresolved)
     response = llm.invoke(prompt)
-    parsed = json.loads(response.content)
+    parsed = json.loads(response.content, strict=False)
 
     question = parsed["question"]
     dimension = parsed["dimension"]
@@ -323,23 +316,21 @@ def _extract_clarified_request(
     if not isinstance(raw, str):
         return None
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(raw, strict=False)
     except json.JSONDecodeError:
         return None
     if not isinstance(parsed, dict):
         return None
 
-    answers = {
-        dim: str(parsed.get(dim, ""))
-        for dim in REQUIRED_DIMENSIONS
-    }
+    answers = {dim: str(parsed.get(dim, "")) for dim in REQUIRED_DIMENSIONS}
     summary = str(parsed.get("summary", ""))
     clarified = _build_clarified_request(answers, summary)
     return clarified, answers
 
 
 def _run_via_deep_agent(
-    state: GraphState, llm: LLMProtocol,
+    state: GraphState,
+    llm: LLMProtocol,
 ) -> dict[str, Any]:
     """Deep Agent variant of ``clarification_node`` (T8, auto mode only)."""
     workdir = get_workdir(state)
@@ -384,15 +375,11 @@ def _run_via_deep_agent(
 
     raw_files = result.get("files")
     vfs_keys: list[str] = (
-        sorted(k for k in raw_files if isinstance(k, str))
-        if isinstance(raw_files, dict)
-        else []
+        sorted(k for k in raw_files if isinstance(k, str)) if isinstance(raw_files, dict) else []
     )
     raw_messages = result.get("messages")
     messages: list[dict[str, object]] = (
-        [m for m in raw_messages if isinstance(m, dict)]
-        if isinstance(raw_messages, list)
-        else []
+        [m for m in raw_messages if isinstance(m, dict)] if isinstance(raw_messages, list) else []
     )
     trace = DeepAgentTrace(
         role=AgentRole.CLARIFIER,
@@ -427,7 +414,8 @@ def _run_via_deep_agent(
 
 
 def _legacy_auto_clarify(
-    state: GraphState, llm: LLMProtocol,
+    state: GraphState,
+    llm: LLMProtocol,
 ) -> dict[str, Any]:
     """Run the legacy auto-clarify single-shot path.
 
@@ -446,7 +434,7 @@ def _legacy_auto_clarify(
             lines = lines[:-1]
         content = "\n".join(lines)
 
-    parsed = json.loads(content)
+    parsed = json.loads(content, strict=False)
     summary = parsed.get("summary", "")
     answers = {dim: parsed.get(dim, "") for dim in REQUIRED_DIMENSIONS}
 

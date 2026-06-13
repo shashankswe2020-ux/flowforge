@@ -147,6 +147,28 @@ class TestSpecProduction:
         result = spec_node(state, llm=llm)
         assert result["run_status"] == RunStatus.RUNNING
 
+    def test_parses_json_with_literal_newlines_in_strings(self) -> None:
+        """Tolerates raw newlines inside string values (Claude/Opus output).
+
+        Models frequently emit multi-paragraph string fields containing literal
+        newlines, which strict json.loads rejects as "Unterminated string". The
+        node parses with strict=False so such responses no longer crash.
+        """
+        raw_response = (
+            "{\n"
+            '  "artifact_path": "docs/specs/x.md",\n'
+            '  "summary": "Line one.\nLine two with a literal newline.",\n'
+            '  "acceptance_criteria": ["VERIFY THAT it works"],\n'
+            '  "assumptions": ["Python 3.12+"],\n'
+            '  "open_questions": []\n'
+            "}"
+        )
+        llm = MockLLM(responses=[raw_response])
+        state = _clarified_state()
+        result = spec_node(state, llm=llm)
+        assert isinstance(result["spec"], SpecOutput)
+        assert "Line two" in result["spec"].summary
+
 
 class TestClarificationValidation:
     """spec_node validates clarification is complete before proceeding."""

@@ -269,7 +269,9 @@ def plan_node(
             lines = lines[:-1]
         content = "\n".join(lines)
 
-    parsed = json.loads(content)
+    # strict=False: LLMs (esp. Claude) emit multi-paragraph string values with
+    # literal newlines, which strict JSON rejects as "Unterminated string".
+    parsed = json.loads(content, strict=False)
 
     # Build TaskDefinition list
     tasks = []
@@ -585,7 +587,7 @@ def _extract_plan(
     if not isinstance(raw, str):
         return None
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(raw, strict=False)
     except json.JSONDecodeError:
         return None
     if not isinstance(parsed, dict) or "tasks" not in parsed:
@@ -672,7 +674,7 @@ def _legacy_plan(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         content = "\n".join(lines)
-    parsed = json.loads(content)
+    parsed = json.loads(content, strict=False)
     parsed, plan = _build_plan_from_parsed(parsed)
     _commit_plan_to_repo(parsed, plan, state)
     return {"run_status": RunStatus.RUNNING, "implementation_plan": plan}

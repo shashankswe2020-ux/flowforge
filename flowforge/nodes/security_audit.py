@@ -59,13 +59,18 @@ def _build_prompt(state: GraphState) -> str:
                 if hasattr(art, "content") and art.content:
                     body = art.content
                     if len(body) > _PROMPT_ARTIFACT_CHAR_LIMIT:
-                        body = body[:_PROMPT_ARTIFACT_CHAR_LIMIT] + f"\n... [{len(art.content) - _PROMPT_ARTIFACT_CHAR_LIMIT} chars truncated]"
+                        body = (
+                            body[:_PROMPT_ARTIFACT_CHAR_LIMIT]
+                            + f"\n... [{len(art.content) - _PROMPT_ARTIFACT_CHAR_LIMIT} chars truncated]"
+                        )
                     section += f"\n```\n{body}\n```"
                 else:
                     section += f"\n  fingerprint: {art.fingerprint}"
                 artifact_sections.append(section)
 
-    artifacts_text = "\n\n".join(artifact_sections) if artifact_sections else "(no artifacts to audit)"
+    artifacts_text = (
+        "\n\n".join(artifact_sections) if artifact_sections else "(no artifacts to audit)"
+    )
 
     # Get spec security context if available
     security_context = ""
@@ -73,12 +78,14 @@ def _build_prompt(state: GraphState) -> str:
         if state.spec.security_considerations:
             security_context = f"""
 ## Spec Security Requirements
-{chr(10).join(f'- {s}' for s in state.spec.security_considerations)}
+{chr(10).join(f"- {s}" for s in state.spec.security_considerations)}
 """
         if state.spec.boundaries:
             never = state.spec.boundaries.get("never", [])
             if never:
-                security_context += f"\n## Hard Prohibitions\n{chr(10).join(f'- {n}' for n in never)}\n"
+                security_context += (
+                    f"\n## Hard Prohibitions\n{chr(10).join(f'- {n}' for n in never)}\n"
+                )
 
     # Prior audit awareness
     prior_audits_section = ""
@@ -234,7 +241,7 @@ def _parse_findings(response_content: str) -> tuple[list[Finding], dict[str, Any
             lines = lines[:-1]
         content = "\n".join(lines)
 
-    parsed = json.loads(content)
+    parsed = json.loads(content, strict=False)
     findings: list[Finding] = []
 
     for f in parsed.get("findings", []):
@@ -355,11 +362,17 @@ def _commit_audit_to_repo(
         rel = audit_path.relative_to(workdir)
         subprocess.run(
             ["git", "add", str(rel)],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         subprocess.run(
             ["git", "commit", "-m", f"docs: add security audit report #{next_num}"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
@@ -379,16 +392,34 @@ def _create_github_issues(findings: list[Finding], state: GraphState) -> None:
     # Ensure labels exist
     try:
         subprocess.run(
-            ["gh", "label", "create", "security",
-             "--color", "B60205",
-             "--description", "Security vulnerability or hardening"],
-            cwd=cwd, capture_output=True, text=True,
+            [
+                "gh",
+                "label",
+                "create",
+                "security",
+                "--color",
+                "B60205",
+                "--description",
+                "Security vulnerability or hardening",
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
         )
         subprocess.run(
-            ["gh", "label", "create", "issue-by-code-review",
-             "--color", "D93F0B",
-             "--description", "Issue identified during code review"],
-            cwd=cwd, capture_output=True, text=True,
+            [
+                "gh",
+                "label",
+                "create",
+                "issue-by-code-review",
+                "--color",
+                "D93F0B",
+                "--description",
+                "Issue identified during code review",
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
         )
     except FileNotFoundError:
         return  # gh CLI not available
@@ -430,13 +461,22 @@ def _create_github_issues(findings: list[Finding], state: GraphState) -> None:
         try:
             subprocess.run(
                 [
-                    "gh", "issue", "create",
-                    "--label", "security",
-                    "--label", "issue-by-code-review",
-                    "--title", title,
-                    "--body", body,
+                    "gh",
+                    "issue",
+                    "create",
+                    "--label",
+                    "security",
+                    "--label",
+                    "issue-by-code-review",
+                    "--title",
+                    title,
+                    "--body",
+                    body,
                 ],
-                cwd=cwd, capture_output=True, text=True, check=True,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                check=True,
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
             continue
@@ -489,8 +529,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         " secret patterns, and check dependency hygiene before writing"
         " findings. After producing the JSON, also save it verbatim to"
         " vfs:/findings/security.json and write a markdown report at"
-        " vfs:/docs/security-audits/security-audit.md.\n\n"
-        + rubric
+        " vfs:/docs/security-audits/security-audit.md.\n\n" + rubric
     )
     payload: dict[str, Any] = {
         "messages": [{"role": "user", "content": user_message}],
@@ -515,8 +554,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
     metadata: dict[str, Any] = {"summary": "", "positive_observations": []}
     raw_messages = result.get("messages")
     messages: list[dict[str, object]] = (
-        [m for m in raw_messages if isinstance(m, dict)]
-        if isinstance(raw_messages, list) else []
+        [m for m in raw_messages if isinstance(m, dict)] if isinstance(raw_messages, list) else []
     )
     for m in reversed(messages):
         content = m.get("content")
@@ -531,8 +569,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
 
     raw_files = result.get("files")
     vfs_keys: list[str] = (
-        sorted(k for k in raw_files if isinstance(k, str))
-        if isinstance(raw_files, dict) else []
+        sorted(k for k in raw_files if isinstance(k, str)) if isinstance(raw_files, dict) else []
     )
     trace = DeepAgentTrace(
         role=AgentRole.AUDITOR,
@@ -548,4 +585,3 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         "security_findings": findings,
         "deep_agent_traces": {"security_audit_node": trace},
     }
-

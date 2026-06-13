@@ -239,7 +239,7 @@ def _parse_issues(
             lines = lines[:-1]
         content = "\n".join(lines)
 
-    parsed = json.loads(content)
+    parsed = json.loads(content, strict=False)
     issues: list[Issue] = []
 
     for item in parsed.get("issues", []):
@@ -632,7 +632,7 @@ def _extract_issues(
     if not isinstance(raw, str):
         return None
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(raw, strict=False)
     except json.JSONDecodeError:
         return None
     if not isinstance(parsed, dict):

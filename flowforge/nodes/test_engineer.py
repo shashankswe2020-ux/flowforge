@@ -62,7 +62,10 @@ def _build_prompt(state: GraphState) -> str:
                 if hasattr(art, "content") and art.content:
                     body = art.content
                     if len(body) > _PROMPT_ARTIFACT_CHAR_LIMIT:
-                        body = body[:_PROMPT_ARTIFACT_CHAR_LIMIT] + f"\n... [{len(art.content) - _PROMPT_ARTIFACT_CHAR_LIMIT} chars truncated]"
+                        body = (
+                            body[:_PROMPT_ARTIFACT_CHAR_LIMIT]
+                            + f"\n... [{len(art.content) - _PROMPT_ARTIFACT_CHAR_LIMIT} chars truncated]"
+                        )
                     section += f"\n```\n{body}\n```"
                 else:
                     section += f"\n  fingerprint: {art.fingerprint}"
@@ -80,12 +83,12 @@ def _build_prompt(state: GraphState) -> str:
         if state.spec.testing_strategy:
             testing_context = f"""
 ## Spec Testing Requirements
-{chr(10).join(f'- {t}' for t in state.spec.testing_strategy)}
+{chr(10).join(f"- {t}" for t in state.spec.testing_strategy)}
 """
         if state.spec.acceptance_criteria:
             testing_context += f"""
 ## Acceptance Criteria (must be tested)
-{chr(10).join(f'- {c}' for c in state.spec.acceptance_criteria[:8])}
+{chr(10).join(f"- {c}" for c in state.spec.acceptance_criteria[:8])}
 """
 
     # Prior test report awareness
@@ -254,7 +257,9 @@ Respond with a JSON object:
 Respond ONLY with the JSON object. No markdown fences, no explanation."""
 
 
-def _parse_response(response_content: str) -> tuple[list[Finding], list[TaskDefinition], dict[str, Any]]:
+def _parse_response(
+    response_content: str,
+) -> tuple[list[Finding], list[TaskDefinition], dict[str, Any]]:
     """Parse LLM response into findings, proposed tasks, and metadata."""
     # Strip markdown fences if present
     content = response_content.strip()
@@ -266,7 +271,7 @@ def _parse_response(response_content: str) -> tuple[list[Finding], list[TaskDefi
             lines = lines[:-1]
         content = "\n".join(lines)
 
-    parsed = json.loads(content)
+    parsed = json.loads(content, strict=False)
 
     # Parse findings
     findings: list[Finding] = []
@@ -302,7 +307,7 @@ def _parse_response(response_content: str) -> tuple[list[Finding], list[TaskDefi
 
         tasks.append(
             TaskDefinition(
-                task_id=t.get("task_id", f"test-task-{len(tasks)+1}"),
+                task_id=t.get("task_id", f"test-task-{len(tasks) + 1}"),
                 title=t["title"],
                 description=t["description"],
                 acceptance_checks=t.get("acceptance_checks", []),
@@ -377,7 +382,9 @@ def _render_test_report_markdown(
         lines.append("| # | Task | Complexity | Verification |")
         lines.append("|---|------|-----------|-------------|")
         for i, t in enumerate(tasks, 1):
-            lines.append(f"| {i} | {t.title} | {t.estimated_complexity} | `{t.verification_step}` |")
+            lines.append(
+                f"| {i} | {t.title} | {t.estimated_complexity} | `{t.verification_step}` |"
+            )
         lines.append("")
 
         for t in tasks:
@@ -392,7 +399,9 @@ def _render_test_report_markdown(
 
 
 def _commit_report_to_repo(
-    findings: list[Finding], tasks: list[TaskDefinition], metadata: dict[str, Any],
+    findings: list[Finding],
+    tasks: list[TaskDefinition],
+    metadata: dict[str, Any],
     state: GraphState,
 ) -> None:
     """Write test report to ``<workdir>/docs/test-reports/`` and commit to git."""
@@ -417,11 +426,17 @@ def _commit_report_to_repo(
         rel = report_path.relative_to(workdir)
         subprocess.run(
             ["git", "add", str(rel)],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         subprocess.run(
             ["git", "commit", "-m", f"docs: add test coverage report #{next_num}"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
@@ -441,16 +456,34 @@ def _create_github_issues(findings: list[Finding], state: GraphState) -> None:
     # Ensure labels exist
     try:
         subprocess.run(
-            ["gh", "label", "create", "testing",
-             "--color", "0E8A16",
-             "--description", "Test coverage or quality issue"],
-            cwd=cwd, capture_output=True, text=True,
+            [
+                "gh",
+                "label",
+                "create",
+                "testing",
+                "--color",
+                "0E8A16",
+                "--description",
+                "Test coverage or quality issue",
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
         )
         subprocess.run(
-            ["gh", "label", "create", "issue-by-test-engineer",
-             "--color", "FBCA04",
-             "--description", "Issue identified by test engineer"],
-            cwd=cwd, capture_output=True, text=True,
+            [
+                "gh",
+                "label",
+                "create",
+                "issue-by-test-engineer",
+                "--color",
+                "FBCA04",
+                "--description",
+                "Issue identified by test engineer",
+            ],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
         )
     except FileNotFoundError:
         return  # gh CLI not available
@@ -481,13 +514,22 @@ def _create_github_issues(findings: list[Finding], state: GraphState) -> None:
         try:
             subprocess.run(
                 [
-                    "gh", "issue", "create",
-                    "--label", "testing",
-                    "--label", "issue-by-test-engineer",
-                    "--title", title,
-                    "--body", body,
+                    "gh",
+                    "issue",
+                    "create",
+                    "--label",
+                    "testing",
+                    "--label",
+                    "issue-by-test-engineer",
+                    "--title",
+                    title,
+                    "--body",
+                    body,
                 ],
-                cwd=cwd, capture_output=True, text=True, check=True,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                check=True,
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
             continue
@@ -548,8 +590,7 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         " also save it verbatim to vfs:/findings/test.json, write the"
         " proposed tasks array to vfs:/context/proposed_tasks.json, and"
         " write a markdown report at"
-        " vfs:/docs/test-reports/test-report.md.\n\n"
-        + rubric
+        " vfs:/docs/test-reports/test-report.md.\n\n" + rubric
     )
     payload: dict[str, Any] = {
         "messages": [{"role": "user", "content": user_message}],
@@ -565,21 +606,18 @@ def _run_via_deep_agent(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
     )
 
     findings = [
-        f.model_copy(update={"source_node": "test_engineer_node"})
-        for f in extract_findings(result)
+        f.model_copy(update={"source_node": "test_engineer_node"}) for f in extract_findings(result)
     ]
     existing_task_ids = {t.task_id for t in state.tasks}
     proposed_tasks = _extract_proposed_tasks(result, existing_task_ids)
 
     raw_files = result.get("files")
     vfs_keys: list[str] = (
-        sorted(k for k in raw_files if isinstance(k, str))
-        if isinstance(raw_files, dict) else []
+        sorted(k for k in raw_files if isinstance(k, str)) if isinstance(raw_files, dict) else []
     )
     raw_messages = result.get("messages")
     messages: list[dict[str, object]] = (
-        [m for m in raw_messages if isinstance(m, dict)]
-        if isinstance(raw_messages, list) else []
+        [m for m in raw_messages if isinstance(m, dict)] if isinstance(raw_messages, list) else []
     )
 
     # Recover summary / coverage_assessment from the agent's final
@@ -637,7 +675,7 @@ def _extract_proposed_tasks(
     if not isinstance(body, str):
         return []
     try:
-        payload = json.loads(body)
+        payload = json.loads(body, strict=False)
     except json.JSONDecodeError:
         return []
     if not isinstance(payload, list):
@@ -658,8 +696,7 @@ def _extract_proposed_tasks(
             capability = CapabilityType.AGENT_ONLY
         ac_raw = item.get("acceptance_checks", [])
         acceptance = (
-            [str(x) for x in ac_raw if isinstance(x, str)]
-            if isinstance(ac_raw, list) else []
+            [str(x) for x in ac_raw if isinstance(x, str)] if isinstance(ac_raw, list) else []
         )
         task_id = str(item.get("task_id", f"test-task-{len(tasks) + 1}"))
         if task_id in seen:
@@ -680,4 +717,3 @@ def _extract_proposed_tasks(
         except (KeyError, TypeError, ValueError):
             continue
     return tasks
-

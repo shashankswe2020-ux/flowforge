@@ -18,6 +18,7 @@ from flowforge.config.deep_agents import resolve_deep_agents_enabled
 from flowforge.deep_agents import AgentRole
 from flowforge.deep_agents.adapters import materialize_files
 from flowforge.deep_agents.factory import build_deep_agent, run_deep_agent_bounded
+from flowforge.nodes._llm import invoke_llm
 from flowforge.nodes._workspace import get_workdir
 from flowforge.state.models import (
     DeepAgentTrace,
@@ -117,11 +118,11 @@ Follow these principles from the spec-driven-development skill:
 - **Solution type**: {cr.solution_type}
 - **Scope**: {cr.scope_size}
 - **Target users**: {cr.target_users}
-- **Must-have features**: {', '.join(cr.must_have)}
-- **Nice-to-have features**: {', '.join(cr.nice_to_have)}
-- **Constraints**: {', '.join(cr.constraints)}
-- **Success criteria**: {', '.join(cr.success_criteria)}
-- **Tech preferences**: {', '.join(cr.tech_preferences)}
+- **Must-have features**: {", ".join(cr.must_have)}
+- **Nice-to-have features**: {", ".join(cr.nice_to_have)}
+- **Constraints**: {", ".join(cr.constraints)}
+- **Success criteria**: {", ".join(cr.success_criteria)}
+- **Tech preferences**: {", ".join(cr.tech_preferences)}
 
 ## Your Task
 
@@ -222,7 +223,7 @@ def spec_node(
         return _run_via_deep_agent(state, llm)
 
     prompt = _build_prompt(state)
-    response = llm.invoke(prompt)
+    response = invoke_llm(llm, prompt, node_name="spec_node")
 
     # Handle response — strip markdown fences if present
     content = response.content if hasattr(response, "content") else str(response)
@@ -236,7 +237,9 @@ def spec_node(
             lines = lines[:-1]
         content = "\n".join(lines)
 
-    parsed = json.loads(content)
+    # strict=False: LLMs (esp. Claude) emit multi-paragraph string values with
+    # literal newlines, which strict JSON rejects as "Unterminated string".
+    parsed = json.loads(content, strict=False)
 
     spec = SpecOutput(
         artifact_path=parsed.get("artifact_path", "docs/spec/spec.md"),
@@ -387,11 +390,17 @@ def _commit_spec_to_repo(spec: SpecOutput, state: GraphState) -> None:
         rel = spec_path.relative_to(workdir)
         subprocess.run(
             ["git", "add", str(rel)],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         subprocess.run(
             ["git", "commit", "-m", f"docs: add specification ({filename})"],
-            cwd=cwd, capture_output=True, text=True, check=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         # Not in a git repo or git not available — skip silently
@@ -435,7 +444,7 @@ def _extract_spec(result: dict[str, object]) -> SpecOutput | None:
     if not isinstance(raw, str):
         return None
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(raw, strict=False)
     except json.JSONDecodeError:
         return None
     if not isinstance(parsed, dict):
@@ -444,7 +453,8 @@ def _extract_spec(result: dict[str, object]) -> SpecOutput | None:
 
 
 def _run_via_deep_agent(
-    state: GraphState, llm: LLMProtocol,
+    state: GraphState,
+    llm: LLMProtocol,
 ) -> dict[str, Any]:
     """Deep Agent variant of ``spec_node`` (T8)."""
     workdir = get_workdir(state)
@@ -488,15 +498,11 @@ def _run_via_deep_agent(
 
     raw_files = result.get("files")
     vfs_keys: list[str] = (
-        sorted(k for k in raw_files if isinstance(k, str))
-        if isinstance(raw_files, dict)
-        else []
+        sorted(k for k in raw_files if isinstance(k, str)) if isinstance(raw_files, dict) else []
     )
     raw_messages = result.get("messages")
     messages: list[dict[str, object]] = (
-        [m for m in raw_messages if isinstance(m, dict)]
-        if isinstance(raw_messages, list)
-        else []
+        [m for m in raw_messages if isinstance(m, dict)] if isinstance(raw_messages, list) else []
     )
     trace = DeepAgentTrace(
         role=AgentRole.SPEC_AUTHOR,
@@ -517,7 +523,7 @@ def _run_via_deep_agent(
 def _legacy_spec(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
     """Legacy single-shot fallback (extracted for fallback reuse)."""
     prompt = _build_prompt(state)
-    response = llm.invoke(prompt)
+    response = invoke_llm(llm, prompt, node_name="spec_node")
     content = response.content if hasattr(response, "content") else str(response)
     content = content.strip()
     if content.startswith("```"):
@@ -527,7 +533,7 @@ def _legacy_spec(state: GraphState, llm: LLMProtocol) -> dict[str, Any]:
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         content = "\n".join(lines)
-    parsed = json.loads(content)
+    parsed = json.loads(content, strict=False)
     spec = _build_spec_output(parsed)
     _commit_spec_to_repo(spec, state)
     return {"run_status": RunStatus.RUNNING, "spec": spec}

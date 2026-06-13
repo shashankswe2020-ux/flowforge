@@ -158,9 +158,7 @@ def _commit_artifacts(workdir: Path, paths: list[Path]) -> None:
         return
     rels = [str(p.relative_to(workdir)) for p in paths]
     try:
-        subprocess.run(
-            ["git", "add", *rels], cwd=str(workdir), check=True, capture_output=True
-        )
+        subprocess.run(["git", "add", *rels], cwd=str(workdir), check=True, capture_output=True)
         subprocess.run(
             [
                 "git",
@@ -218,9 +216,7 @@ def _predecessor_skip_decision(
         status=TaskStatus.SKIPPED,
         artifacts=[],
         verification_evidence=[],
-        error_message=(
-            f"skipped: predecessor task(s) {', '.join(blockers)} did not succeed"
-        ),
+        error_message=(f"skipped: predecessor task(s) {', '.join(blockers)} did not succeed"),
         idempotency_key=None,
     )
 
@@ -351,7 +347,7 @@ def _execute_one_via_deep(
     if not isinstance(result_files, dict) or not any(
         isinstance(k, str)
         and k.startswith("vfs:/")
-        and not k[len("vfs:/"):].startswith(
+        and not k[len("vfs:/") :].startswith(
             ("findings/", "context/", "subagent/"),
         )
         for k in result_files
@@ -360,9 +356,7 @@ def _execute_one_via_deep(
 
     raw_messages = result.get("messages")
     messages = (
-        [m for m in raw_messages if isinstance(m, dict)]
-        if isinstance(raw_messages, list)
-        else []
+        [m for m in raw_messages if isinstance(m, dict)] if isinstance(raw_messages, list) else []
     )
     vfs_keys = sorted(k for k in result_files if isinstance(k, str))
     trace = DeepAgentTrace(
@@ -385,8 +379,7 @@ def _execute_one_via_deep(
             artifacts=[],
             verification_evidence=[],
             error_message=(
-                f"secret_scanner blocked run: {offending.pattern_name} "
-                f"on line {offending.line}"
+                f"secret_scanner blocked run: {offending.pattern_name} on line {offending.line}"
             ),
             idempotency_key=None,
         )
@@ -459,7 +452,7 @@ def _scan_files_for_secrets(
             continue
         if not raw_path.startswith("vfs:/"):
             continue
-        rel = raw_path[len("vfs:/"):]
+        rel = raw_path[len("vfs:/") :]
         if rel.startswith(("findings/", "context/", "subagent/")):
             continue
         # Reject traversal *before* any filesystem read.
@@ -507,7 +500,7 @@ def _extract_verification_evidence(result: dict[str, Any]) -> list[str]:
     if not isinstance(raw, str):
         return []
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(raw, strict=False)
     except json.JSONDecodeError:
         return []
     if not isinstance(parsed, dict):
@@ -519,7 +512,8 @@ def _extract_verification_evidence(result: dict[str, Any]) -> list[str]:
 
 
 def _run_via_deep_agent(
-    state: GraphState, llm: LLMProtocol,
+    state: GraphState,
+    llm: LLMProtocol,
 ) -> dict[str, Any] | None:
     """Deep Agent variant of ``task_node`` (T9).
 
@@ -559,14 +553,10 @@ def _run_via_deep_agent(
         aggregate_invocations.extend(invocations)
         messages_obj = result.get("messages")
         if isinstance(messages_obj, list):
-            aggregate_messages.extend(
-                m for m in messages_obj if isinstance(m, dict)
-            )
+            aggregate_messages.extend(m for m in messages_obj if isinstance(m, dict))
         files_obj = result.get("files")
         if isinstance(files_obj, dict):
-            aggregate_vfs_keys.update(
-                k for k in files_obj if isinstance(k, str)
-            )
+            aggregate_vfs_keys.update(k for k in files_obj if isinstance(k, str))
 
     for definition in plan.dag.tasks:
         graph = build_deep_agent(
@@ -593,7 +583,7 @@ def _run_via_deep_agent(
         if not isinstance(result_files, dict) or not any(
             isinstance(k, str)
             and k.startswith("vfs:/")
-            and not k[len("vfs:/"):].startswith(
+            and not k[len("vfs:/") :].startswith(
                 ("findings/", "context/", "subagent/"),
             )
             for k in result_files
@@ -607,9 +597,7 @@ def _run_via_deep_agent(
             workdir,
         )
         if has_blocking_secret(findings):
-            offending = next(
-                f for f in findings if f.severity.value == "high"
-            )
+            offending = next(f for f in findings if f.severity.value == "high")
             blocked_task = Task(
                 task_id=definition.task_id,
                 definition=definition,
@@ -617,8 +605,7 @@ def _run_via_deep_agent(
                 artifacts=[],
                 verification_evidence=[],
                 error_message=(
-                    f"secret_scanner blocked run: {offending.pattern_name} "
-                    f"on line {offending.line}"
+                    f"secret_scanner blocked run: {offending.pattern_name} on line {offending.line}"
                 ),
                 idempotency_key=None,
             )

@@ -18,3 +18,4 @@ tokens.json
 
 # FlowForge runtime
 ~/.flowforge/
+.DS_Store

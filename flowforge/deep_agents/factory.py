@@ -19,6 +19,8 @@ timeouts and tool budgets land in T10.
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 import os
 import time
 from threading import Lock
@@ -66,6 +68,8 @@ __all__ = [
     "run_deep_agent_bounded",
     "tools_for_role",
 ]
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -357,6 +361,21 @@ def run_deep_agent_bounded(
                 node_name=node_name,
                 partial_trace=_partial_trace(budget),
             ) from exc
+        except json.JSONDecodeError:
+            # The underlying model can emit a tool call whose JSON
+            # arguments are truncated or otherwise malformed; the
+            # deepagents/LangChain tool-call parser then raises a
+            # ``json.JSONDecodeError`` from deep inside ``graph.invoke``.
+            # A single bad tool call must not abort the whole pipeline:
+            # return an empty structured result so the node's
+            # ``_extract_*`` sees no artifact and falls back to its legacy
+            # single-shot path (which does not depend on tool-calling).
+            logger.warning(
+                "deep agent run for %r produced malformed tool-call JSON; "
+                "falling back to legacy path",
+                node_name,
+            )
+            return {"messages": [], "files": {}}
         if not isinstance(result, dict):
             raise TypeError(
                 f"graph.invoke must return a dict (got {type(result).__name__})",

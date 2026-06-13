@@ -19,6 +19,7 @@ Covers the spec §10 item 6 contract:
 
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -250,6 +251,36 @@ class TestRunDeepAgentBounded:
                 timeout_s=5,
                 tool_budget=10,
             )
+
+    def test_malformed_tool_call_json_falls_back_to_empty_result(self) -> None:
+        """A truncated/malformed tool-call argument must not abort the node.
+
+        The underlying model can emit a tool call whose JSON arguments are
+        truncated; the deepagents/LangChain parser then raises
+        ``json.JSONDecodeError`` from inside ``graph.invoke``. Rather than
+        crash the whole pipeline, ``run_deep_agent_bounded`` returns an
+        empty structured result so the node's ``_extract_*`` sees no
+        artifact and falls back to its legacy single-shot path.
+        """
+
+        def malformed(_payload: dict[str, object]) -> dict[str, object]:
+            # Reproduce the exact failure: parsing a truncated JSON string.
+            json.loads('{"content": "unterminated')
+            return {}  # pragma: no cover - never reached
+
+        graph = _FakeGraph(malformed)
+        sink: list[ToolInvocationRecord] = []
+        out = run_deep_agent_bounded(
+            graph,  # type: ignore[arg-type]
+            {},
+            role=AgentRole.CLARIFIER,
+            node_name="clarification_node",
+            timeout_s=5,
+            tool_budget=10,
+            invocation_sink=sink,
+        )
+        # Empty structured output -> node falls back to legacy.
+        assert out == {"messages": [], "files": {}}
 
     def test_clears_budget_var_after_run(self) -> None:
         graph = _FakeGraph(lambda _p: {})
